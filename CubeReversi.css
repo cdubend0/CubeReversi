@@ -1,0 +1,1002 @@
+/* Cube Reversi 1.23.0 */
+
+/* Version 1.21.0 — loaded-sequence score visibility and game-start splash/settings screen */
+#startOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(8, 11, 13, 0.94);
+}
+
+#startOverlay:not(.visible) {
+  display: none;
+}
+
+#startPanel {
+  position: relative;
+  width: min(92vw, 430px);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 1rem;
+  background: #171d20;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+
+#startTitle {
+  margin: 0 0 1.2rem;
+  font-size: 1.8rem;
+  text-align: center;
+}
+
+.start-logo {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+#colorFieldset.start-hidden {
+  display: none;
+}
+
+#gameDurationLabel.start-hidden,
+#gameDuration.start-hidden {
+  display: none;
+}
+
+.start-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+}
+
+.start-mode-row #colorFieldset.start-hidden {
+  display: none;
+}
+
+.start-fieldset {
+  margin: 0 0 1rem;
+  padding: .85rem 1rem 1rem;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: .65rem;
+}
+
+.start-fieldset legend {
+  padding: 0 .35rem;
+  font-weight: 700;
+}
+
+.start-option {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  padding: .45rem 0;
+  cursor: pointer;
+}
+
+.start-option input {
+  margin: 0;
+}
+
+.start-option small {
+  opacity: .55;
+}
+
+.start-option-disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.start-select-label {
+  display: block;
+  margin: .25rem 0 .45rem;
+  font-weight: 700;
+}
+
+#gameDuration {
+  width: 100%;
+  padding: .7rem .75rem;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: .5rem;
+  background: #111518;
+  color: inherit;
+  font: inherit;
+}
+
+.start-note {
+  margin: .7rem 0 0;
+  font-size: .8rem;
+  line-height: 1.4;
+  opacity: .55;
+}
+
+#startActionRow {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: .65rem;
+  margin-top: 1.25rem;
+}
+
+#startActionRow button {
+  width: auto;
+  margin-top: 0;
+}
+
+
+
+/* Version 1.22.35 — place Resign and New Game side by side to reduce the
+   vertical height of the control panel after adding additional toggles. */
+.final-actions {
+  display: flex;
+  gap: .6rem;
+  margin-top: 1rem;
+}
+
+.final-actions button {
+  flex: 1 1 0;
+  width: auto;
+  margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  #startOverlay {
+    align-items: flex-start;
+    padding-top: 4vh;
+  }
+
+  #startPanel {
+    width: min(94vw, 430px);
+  }
+}
+
+/* Cube Reversi 1.20.6 */
+
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #e8ecef;
+  background: #111518;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at center, #1b2429 0%, #0d1113 70%);
+  overscroll-behavior-y: none;
+}
+
+/* Version 1.22.26 — keep the header and main game area inside a dedicated
+   app shell. On desktop the shell fills the viewport, with the header taking
+   its natural height and the game/controls taking all remaining space.
+   Mobile remains naturally scrollable so the lower controls stay below the
+   game. */
+#appShell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+@media (min-width: 761px) {
+  #appShell {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+.brand-group {
+  display: grid;
+  grid-template-columns: 48px auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: .7rem;
+  min-width: 0;
+}
+
+.brand-logo {
+  cursor: default;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.brand-text {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.brand-text h1 {
+  cursor: default;
+}
+
+.brand-text h1:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+.version {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.topbar {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255,255,255,.12);
+}
+
+/* Version 1.18.3 — prevent accidental text selection during touch play. */
+.topbar,
+.topbar * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Version 1.20.7 — prevent accidental text selection in the lower controls
+   sidebar during touch/cube manipulation on mobile devices. */
+.controls,
+.controls * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+}
+
+.version {
+  margin: .25rem 0 0;
+  opacity: .65;
+  font-size: .9rem;
+  text-align: left;
+}
+
+.version-number,
+.version-separator,
+.version-board-size {
+  display: inline;
+}
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .25rem;
+  font-size: .95rem;
+}
+
+
+/* Version 1.12.5 — hide game clocks in Unlimited mode */
+/* Version 1.18.3 — combine each player's score and clock in one row. */
+/* Version 1.21.0 — keep scores in the player rows when clocks are hidden. */
+.score-summary {
+  display: none;
+}
+
+.clock-panel.clock-hidden {
+  display: none;
+}
+
+.clock-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .25rem;
+}
+
+.clock-label {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#game {
+  position: relative;
+  min-height: 0;
+  background: #000000;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+}
+
+#scene canvas {
+  display: block;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  width: 100%;
+  height: 100%;
+}
+
+.controls {
+  position: relative;
+  padding: 1.25rem;
+  border-left: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.16);
+}
+
+.controls h2 {
+  margin-top: 0;
+}
+
+.controls p {
+  line-height: 1.45;
+  opacity: .8;
+}
+
+button {
+  width: 100%;
+  margin-top: 1rem;
+  padding: .75rem;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: .5rem;
+  background: rgba(255,255,255,.08);
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255,255,255,.15);
+}
+
+/* Version 1.8.5 — Undo Move is unavailable until at least one move exists. */
+button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+button:disabled:hover {
+  background: rgba(255,255,255,.08);
+}
+
+/* Version 1.22.26 — place Undo and Redo side by side to reduce the
+   vertical height of the desktop and mobile control panels. */
+.history-actions {
+  display: flex;
+  gap: .6rem;
+  margin-top: 1rem;
+}
+
+.history-actions button {
+  flex: 1 1 0;
+  width: auto;
+  margin-top: 0;
+}
+
+/* Version 1.22.29 — place Move Sequence and Load Sequence side by side to
+   reduce the vertical height of the control panel. */
+.sequence-actions {
+  display: flex;
+  gap: .6rem;
+  margin-top: 1rem;
+}
+
+.sequence-actions button {
+  flex: 1 1 0;
+  width: auto;
+  margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+
+  #game {
+    min-height: 70vh;
+  }
+
+  .controls {
+    border-left: 0;
+    border-top: 1px solid rgba(255,255,255,.12);
+    padding-top: 2rem;
+  }
+
+  /* Version 1.22.21 — the mobile controls handle protrudes above the
+     controls section so it remains visible and easy to grab even when Safari
+     places its URL bar over the bottom of the viewport. It accepts vertical
+     touch gestures so it can be used as a natural starting point for scrolling. */
+  .controls::before {
+    content: "";
+    position: absolute;
+    top: -1.35rem;
+    left: 50%;
+    width: 96px;
+    height: 1.15rem;
+    transform: translateX(-50%);
+    border: 1px solid rgba(255,255,255,.12);
+    border-bottom: 0;
+    border-radius: 1rem 1rem 0 0;
+    background: rgba(17,21,24,.96);
+    box-shadow: 0 -1px 0 rgba(255,255,255,.04);
+    pointer-events: auto;
+    touch-action: pan-y;
+  }
+
+  .controls::after {
+    content: "";
+    position: absolute;
+    top: -1rem;
+    left: 50%;
+    width: 52px;
+    height: 6px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: rgba(255,255,255,.38);
+    pointer-events: none;
+  }
+}
+
+/* Version 1.5.1 — centered, larger turn indicator */
+.turn-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.35rem;
+  font-weight: 700;
+  white-space: pre-line;
+  text-align: center;
+  pointer-events: none;
+}
+
+.playing-as {
+  display: block;
+  margin-bottom: .15rem;
+  font-size: .72em;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.turn-move-count {
+  display: block;
+  margin-top: .15rem;
+  font-size: .72em;
+  font-weight: 500;
+  opacity: .8;
+  white-space: nowrap;
+}
+
+/* Version 1.5.1 — lower-left coordinate-axis model */
+#coordinateAxes {
+  position: absolute;
+  left: -30px;
+  bottom: -80px;
+  width: 290px;
+  height: 290px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#coordinateAxes canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Version 1.5.1 — coordinate readout */
+#coordinateReadout {
+  position: absolute;
+  left: 14px;
+  bottom: 4px;
+  width: 290px;
+  text-align: center;
+  color: #ffff00;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 6;
+}
+
+
+/* Version 1.5.1 — coordinate move entry */
+#moveEntry {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .45rem .55rem;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: .6rem;
+  background: rgba(10,14,16,.72);
+  backdrop-filter: blur(6px);
+  z-index: 7;
+}
+
+#moveEntry label {
+  font-size: .85rem;
+  opacity: .8;
+}
+
+#moveCoordinate {
+  width: 105px;
+  padding: .42rem .5rem;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: .4rem;
+  background: rgba(255,255,255,.07);
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+#moveCoordinate::placeholder {
+  opacity: .45;
+}
+
+#moveEntry button {
+  width: auto;
+  margin: 0;
+  padding: .42rem .7rem;
+}
+
+@media (max-width: 760px) {
+  #moveEntry,
+  #coordinateAxes,
+  #coordinateReadout {
+    display: none;
+  }
+
+  /* Version 1.18.3 — responsive header structure. */
+  .brand-group {
+    grid-template-columns: 48px auto;
+    grid-template-rows: auto auto auto;
+    align-items: start;
+  }
+
+  .brand-text {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .version {
+    grid-column: 1 / -1;
+    grid-row: 2 / span 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .1rem;
+  }
+
+  .version-separator {
+    display: none;
+  }
+
+  .version-board-size {
+    display: block;
+    margin-top: 0;
+  }
+
+  /* Version 1.22.6 — add vertical header space on mobile so the centered
+     Playing As / turn block has room to sit lower without crowding the header. */
+  .topbar {
+    align-items: flex-start;
+    padding-bottom: 2rem;
+  }
+
+  .status-panel {
+    flex-shrink: 0;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .turn-status {
+    position: absolute;
+    left: 50%;
+    top: auto;
+    bottom: .65rem;
+    transform: translateX(-50%);
+    font-size: 1.05rem;
+    text-align: center;
+    white-space: nowrap;
+  }
+}
+
+/* Version 1.5.1 — guided coordinate entry */
+#moveCoordinate {
+  text-transform: uppercase;
+}
+
+
+/* Version 1.6.7 — Auto-Rotate sidebar toggle */
+.toggle-control {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin-top: 1rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.toggle-control input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: #6f9f7d;
+}
+
+
+/* Version 1.7.3 — pass/game-complete overlay */
+#passOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 1.5rem;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, .52);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+#passOverlay.visible {
+  display: flex;
+}
+
+#passMessage {
+  padding: 1rem 1.75rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.94);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.35);
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  font-weight: 700;
+  white-space: pre-line;
+  text-align: center;
+}
+
+#passOverlay:hover #passMessage {
+  background: rgba(35,43,48,.96);
+}
+
+/* Version 1.7.7 — Show 3-Axis sidebar toggle uses the existing toggle styling. */
+
+
+/* Version 1.8.8 — Keyboard help legend */
+#helpOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 22;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+  cursor: pointer;
+}
+
+#helpOverlay.visible {
+  display: flex;
+}
+
+#helpPanel {
+  width: min(420px, 100%);
+  padding: 1.25rem 1.4rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+  cursor: default;
+}
+
+#helpPanel h2 {
+  margin: 0 0 .9rem;
+}
+
+#helpPanel p {
+  margin: .45rem 0;
+}
+
+/* Version 1.8.2 — Move Sequence viewer */
+#sequenceOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+#sequenceOverlay.visible {
+  display: flex;
+}
+
+#sequencePanel {
+  width: min(680px, 100%);
+  max-height: 80%;
+  padding: 1.25rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+}
+
+#sequencePanel h2 {
+  margin: 0 0 .75rem;
+}
+
+#moveSequence {
+  display: block;
+  width: 100%;
+  min-height: 110px;
+  resize: none;
+  padding: .7rem;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: .45rem;
+  background: rgba(255,255,255,.06);
+  color: inherit;
+  font: .95rem/1.5 monospace;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+#sequenceActions {
+  display: flex;
+  gap: .6rem;
+  justify-content: flex-end;
+}
+
+#sequenceActions button {
+  width: auto;
+  min-width: 90px;
+  margin-top: .75rem;
+}
+
+/* Version 1.8.8 — Move Sequence loader */
+#loadSequenceOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 22;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+#loadSequenceOverlay.visible {
+  display: flex;
+}
+
+#loadSequencePanel {
+  width: min(680px, 100%);
+  max-height: 80%;
+  padding: 1.25rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+}
+
+#loadSequencePanel h2 {
+  margin: 0 0 .75rem;
+}
+
+#loadSequencePanel p {
+  margin: 0 0 .75rem;
+  color: rgba(255,255,255,.78);
+}
+
+#loadSequenceInput {
+  display: block;
+  width: 100%;
+  min-height: 130px;
+  resize: vertical;
+  padding: .7rem;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: .45rem;
+  background: rgba(255,255,255,.06);
+  color: inherit;
+  font: .95rem/1.5 monospace;
+}
+
+#loadSequenceError {
+  min-height: 1.4em;
+  margin-top: .6rem;
+  color: #ffb4b4;
+}
+
+
+/* Version 1.11.1 — custom resignation confirmation */
+#resignConfirmOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+#resignConfirmOverlay.visible {
+  display: flex;
+}
+
+#resignConfirmPanel {
+  width: min(420px, 100%);
+  padding: 1.25rem 1.4rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+}
+
+#resignConfirmTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+#resignConfirmActions {
+  display: flex;
+  justify-content: center;
+  gap: .75rem;
+  margin-top: 1.1rem;
+}
+
+#resignConfirmActions button {
+  width: auto;
+  min-width: 96px;
+  margin-top: 0;
+}
+
+
+/* Version 1.20.7 — choose play mode after loading a sequence */
+#loadedSequenceChoiceOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 101;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+#loadedSequenceChoiceOverlay.visible {
+  display: flex;
+}
+
+#loadedSequenceChoicePanel {
+  width: min(420px, 100%);
+  padding: 1.25rem 1.4rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+}
+
+#loadedSequenceChoiceTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+#loadedSequenceChoiceMessage {
+  margin: .75rem 0 1rem;
+  color: rgba(255,255,255,.78);
+  line-height: 1.45;
+  text-align: center;
+}
+
+.loaded-sequence-choice-fieldset {
+  margin: 0;
+  padding: .65rem 1rem .8rem;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: .65rem;
+}
+
+#loadedSequenceChoiceActions {
+  display: flex;
+  justify-content: center;
+}
+
+#loadedSequenceChoiceActions button {
+  width: auto;
+  min-width: 110px;
+  margin-top: .9rem;
+}
+
+
+/* Version 1.20.7 — generic confirmation for actions that end an active game */
+#gameEndConfirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+#gameEndConfirmOverlay.visible {
+  display: flex;
+}
+
+#gameEndConfirmPanel {
+  width: min(420px, 100%);
+  padding: 1.25rem 1.4rem;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: .65rem;
+  background: rgba(17,21,24,.96);
+  box-shadow: 0 .5rem 2rem rgba(0,0,0,.4);
+}
+
+#gameEndConfirmTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+#gameEndConfirmMessage {
+  margin: .75rem 0 0;
+  color: rgba(255,255,255,.78);
+  line-height: 1.45;
+  text-align: center;
+}
+
+#gameEndConfirmActions {
+  display: flex;
+  justify-content: center;
+  gap: .75rem;
+  margin-top: 1.1rem;
+}
+
+#gameEndConfirmActions button {
+  width: auto;
+  min-width: 96px;
+  margin-top: 0;
+}
