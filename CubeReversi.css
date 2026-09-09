@@ -1,4 +1,4 @@
-/* Cube Reversi 1.28.22 */
+/* Cube Reversi 1.28.23 */
 
 /* Version 1.21.0 — loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -1108,7 +1108,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.28.22 — persistent Classic opening recognition label. */
+/* Version 1.28.23 — persistent Classic opening recognition label. */
 .book-opening-label {
   position: absolute;
   top: .85rem;

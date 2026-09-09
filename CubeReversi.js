@@ -3,7 +3,7 @@ import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import { chooseMove } from './CubeReversiBot.js';
 
 /*
- * Cube Reversi 1.28.21
+ * Cube Reversi 1.28.23
  *
  * Multi-size board release:
  * - 4×4×4, 6×6×6, 8×8×8, or 8×8×1 Classic board
@@ -844,7 +844,7 @@ function updateBotDeveloperPanel() {
 
   const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   const lines = [
-    `Cube Reversi Bot Developer Summary — Version 1.28.22`,
+    `Cube Reversi Bot Developer Summary — Version 1.28.23`,
     `Board: ${boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
     `Browser: ${navigator.userAgent}`,
@@ -1702,7 +1702,7 @@ function parseCoordinateNotation(value) {
 
 
 // -----------------------------------------------------------------------------
-// Classic Opening Recognition — Version 1.28.22
+// Classic Opening Recognition — Version 1.28.23
 // -----------------------------------------------------------------------------
 // This catalog is display-only. It does not change Bot move selection. It
 // recognizes established named openings and named continuations from the
@@ -2798,8 +2798,8 @@ function resignGame() {
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
-  versionLabel.innerHTML = `<span class="version-number">Version 1.28.22</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
-  document.title = `Cube Reversi — 1.28.21`;
+  versionLabel.innerHTML = `<span class="version-number">Version 1.28.23</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  document.title = `Cube Reversi — 1.28.23`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 

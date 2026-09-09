@@ -1,5 +1,5 @@
 /*
- * Cube Reversi 1.28.22 — Bot Engine
+ * Cube Reversi 1.28.23 — Bot Engine
  *
  * The Bot Engine remains a move-selection layer only. CubeReversi.js remains
  * authoritative for game state, rules, legal moves, rendering, turn management,
@@ -218,7 +218,7 @@ function moveKey(move) {
 }
 
 // -----------------------------------------------------------------------------
-// Classic Opening Book — Version 1.28.22
+// Classic Opening Book — Version 1.28.23
 // -----------------------------------------------------------------------------
 // The opening book supplements the normal search engine; it never replaces it.
 // It is intentionally limited to the 8×8×1 Classic board. Positions are
@@ -859,7 +859,7 @@ export function chooseMove(moveOptions, context = null) {
   const counts = countDiscs(board, size, depth);
   const profile = DIFFICULTY_PROFILES[context.difficulty] || DIFFICULTY_PROFILES.medium;
 
-  // Version 1.28.22: established Classic openings are consulted before search.
+  // Version 1.28.23: established Classic openings are consulted before search.
   // The authoritative controller still supplies the legal move list, and the
   // book is never used for 3D boards.
   if (depth === 1 && size === 8 && context.difficulty !== 'easy') {
