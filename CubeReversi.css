@@ -1,4 +1,4 @@
-/* Cube Reversi 1.23.0 */
+/* Cube Reversi 1.28.22 */
 
 /* Version 1.21.0 — loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -18,10 +18,10 @@
 
 #startPanel {
   position: relative;
-  width: min(92vw, 430px);
+  width: min(92vw, 620px);
   max-height: 92vh;
   overflow-y: auto;
-  padding: 1.5rem;
+  padding: 1.25rem;
   border: 1px solid rgba(255,255,255,.16);
   border-radius: 1rem;
   background: #171d20;
@@ -43,12 +43,16 @@
   object-fit: contain;
 }
 
-#colorFieldset.start-hidden {
+#colorFieldset.start-hidden,
+#colorFieldset[hidden],
+#difficultyFieldset.start-hidden,
+#difficultyFieldset[hidden] {
   display: none;
 }
 
 #gameDurationLabel.start-hidden,
-#gameDuration.start-hidden {
+#gameDuration.start-hidden,
+#difficultyFieldset.start-hidden {
   display: none;
 }
 
@@ -60,6 +64,18 @@
 
 .start-mode-row #colorFieldset.start-hidden {
   display: none;
+}
+
+
+.start-board-settings-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+  align-items: start;
+}
+
+.start-board-settings-row > .start-fieldset {
+  margin-bottom: 1rem;
 }
 
 .start-fieldset {
@@ -80,6 +96,11 @@
   gap: .65rem;
   padding: .45rem 0;
   cursor: pointer;
+}
+
+.board-size-list {
+  display: flex;
+  flex-direction: column;
 }
 
 .start-option input {
@@ -116,6 +137,16 @@
   font-size: .8rem;
   line-height: 1.4;
   opacity: .55;
+}
+
+.start-menu-version {
+  position: absolute;
+  top: .75rem;
+  right: 1rem;
+  margin: 0;
+  font-size: .75rem;
+  opacity: .55;
+  text-align: right;
 }
 
 #startActionRow {
@@ -291,6 +322,14 @@ h1 {
   font-size: .95rem;
 }
 
+.bot-difficulty-label {
+  margin-top: .1rem;
+  font-size: .8rem;
+  font-weight: 600;
+  opacity: .78;
+  white-space: nowrap;
+}
+
 
 /* Version 1.12.5 — hide game clocks in Unlimited mode */
 /* Version 1.18.3 — combine each player's score and clock in one row. */
@@ -326,7 +365,7 @@ main {
 #game {
   position: relative;
   min-height: 0;
-  background: #000000;
+  background: #0e382b;
 }
 
 #scene {
@@ -348,6 +387,8 @@ main {
 .controls {
   position: relative;
   padding: 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-left: 1px solid rgba(255,255,255,.12);
   background: rgba(0,0,0,.16);
 }
@@ -374,6 +415,55 @@ button {
 
 button:hover {
   background: rgba(255,255,255,.15);
+}
+
+
+/* Version 1.28.16 — optional developer-mode Bot search diagnostics. The
+   panel is placed at the top of the controls so it is immediately visible
+   during a Developer Mode game instead of being clipped below the controls. */
+.developer-mode-option {
+  margin-top: .5rem;
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: .7rem;
+}
+
+.developer-mode-option small {
+  margin-left: auto;
+  font-size: .75rem;
+}
+
+.bot-developer-panel {
+  margin: 0 0 1rem;
+  padding: .8rem;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: .55rem;
+  background: rgba(0,0,0,.18);
+}
+
+.bot-developer-panel[hidden] {
+  display: none;
+}
+
+.bot-developer-panel h2 {
+  margin: 0 0 .65rem;
+  font-size: 1rem;
+}
+
+#botDeveloperOutput {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: .65rem;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: .45rem;
+  background: rgba(0,0,0,.25);
+  color: inherit;
+  font: .72rem/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+#copyBotDeveloperButton {
+  margin-top: .65rem;
 }
 
 /* Version 1.8.5 — Undo Move is unavailable until at least one move exists. */
@@ -633,6 +723,17 @@ button:disabled:hover {
   }
 }
 
+/* Version 1.28.16 — narrow Chromebook/desktop-pointer repair. A small
+   browser viewport should not hide the synchronized coordinate model merely
+   because it is below the phone breakpoint. Phones/tablets keep the compact
+   mobile layout; pointer-capable narrow displays retain the guide. */
+@media (max-width: 760px) and (hover: hover) and (pointer: fine) {
+  #coordinateAxes,
+  #coordinateReadout {
+    display: block;
+  }
+}
+
 /* Version 1.5.1 — guided coordinate entry */
 #moveCoordinate {
   text-transform: uppercase;
@@ -676,7 +777,8 @@ button:disabled:hover {
 }
 
 #passOverlay.visible {
-  display: flex;
+  display: grid;
+  place-items: center;
 }
 
 #passMessage {
@@ -937,6 +1039,10 @@ button:disabled:hover {
   border-radius: .65rem;
 }
 
+.loaded-sequence-choice-fieldset + .loaded-sequence-choice-fieldset {
+  margin-top: .75rem;
+}
+
 #loadedSequenceChoiceActions {
   display: flex;
   justify-content: center;
@@ -999,4 +1105,30 @@ button:disabled:hover {
   width: auto;
   min-width: 96px;
   margin-top: 0;
+}
+
+
+/* Version 1.28.22 — persistent Classic opening recognition label. */
+.book-opening-label {
+  position: absolute;
+  top: .85rem;
+  left: .85rem;
+  z-index: 12;
+  max-width: min(30rem, calc(100% - 1.7rem));
+  padding: .5rem .7rem;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: .45rem;
+  background: rgba(0,0,0,.42);
+  color: rgba(255,255,255,.92);
+  font-size: .84rem;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: .01em;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,.55);
+  backdrop-filter: blur(2px);
+}
+
+.book-opening-label[hidden] {
+  display: none;
 }

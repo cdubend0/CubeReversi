@@ -3,13 +3,15 @@ import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import { chooseMove } from './CubeReversiBot.js';
 
 /*
- * Cube Reversi 1.23.0
+ * Cube Reversi 1.28.21
  *
  * Multi-size board release:
- * - 4×4×4, 6×6×6, or 8×8×8 board
+ * - 4×4×4, 6×6×6, 8×8×8, or 8×8×1 Classic board
  * - 4×4×4 remains the default
- * - 8 starting spheres in the central 2×2×2 block
- * - 26 possible capture directions
+ * - 8×8×1 Classic uses the standard four-piece Reversi opening
+ * - Classic starts with a straight-on orthogonal view and a 2D corner guide
+ * - 8 starting spheres in the central 2×2×2 block on 3D boards
+ * - 26 possible capture directions (8 effective directions on Classic)
  * - optional green occupied-cell surfaces
  * - optional blue legal-move surfaces with golden hover highlighting
  * - black/white spheres represent pieces
@@ -25,11 +27,13 @@ import { chooseMove } from './CubeReversiBot.js';
  */
 
 let SIZE = 4;
+let BOARD_DEPTH = 4;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
 const spacing = 1.25;
 let boardOffset = (SIZE - 1) / 2;
+let boardOffsetZ = (BOARD_DEPTH - 1) / 2;
 const MOBILE_CAMERA_SCALE = 1.35;
 let blackScore = 4;
 let whiteScore = 4;
@@ -40,6 +44,23 @@ function isMobileViewport() {
 
 function setInitialCameraPosition() {
   const scale = isMobileViewport() ? MOBILE_CAMERA_SCALE : 1;
+
+  // Version 1.25.4: Classic 8×8×1 remains orthogonal and starts about 33%
+  // farther from the board than 1.25.3. resetView() uses this same function,
+  // so R returns Classic mode to this exact zoom and orientation.
+  if (BOARD_DEPTH === 1) {
+    const distance = 17.024 * scale;
+    // Version 1.27.12: Classic remains logically 2D, but the visual camera
+    // is given a small fixed elevation so the six-face occupied cube shells
+    // have visible depth instead of appearing as flat front-facing planes.
+    // This is a Classic-only visual change; the logical board and coordinates
+    // remain 8×8×1 and A–H / 1–8.
+    const elevation = distance * 0.18;
+    const depth = Math.sqrt(Math.max(0, distance * distance - elevation * elevation));
+    camera.position.set(0, -elevation, depth);
+    return;
+  }
+
   const base = 7.2 + (SIZE - 4) * 1.4;
   camera.position.set(base * scale, (base - 1) * scale, base * scale);
 }
@@ -74,6 +95,16 @@ const confirmResignButton = document.getElementById('confirmResignButton');
 const gameEndConfirmOverlay = document.getElementById('gameEndConfirmOverlay');
 const loadedSequenceChoiceOverlay = document.getElementById('loadedSequenceChoiceOverlay');
 const loadedSequenceChoiceContinue = document.getElementById('loadedSequenceChoiceContinue');
+const loadedBotDifficultyFieldset = document.getElementById('loadedBotDifficultyFieldset');
+const botDifficultyLabel = document.getElementById('botDifficultyLabel');
+const developerModeToggle = document.getElementById('developerModeToggle');
+const bookOpeningsToggle = document.getElementById('bookOpeningsToggle');
+const bookOpeningLabel = document.getElementById('bookOpeningLabel');
+const botDeveloperPanel = document.getElementById('botDeveloperPanel');
+const botDeveloperOutput = document.getElementById('botDeveloperOutput');
+const copyBotDeveloperButton = document.getElementById('copyBotDeveloperButton');
+const loadedPlayerModeInputs = document.querySelectorAll('input[name="loadedPlayerMode"]');
+const loadedBotDifficultyInputs = document.querySelectorAll('input[name="loadedBotDifficulty"]');
 const gameEndConfirmMessage = document.getElementById('gameEndConfirmMessage');
 const confirmGameEndButton = document.getElementById('confirmGameEndButton');
 const cancelGameEndButton = document.getElementById('cancelGameEndButton');
@@ -104,7 +135,7 @@ const moveEntry = document.getElementById('moveEntry');
 const moveCoordinateInput = document.getElementById('moveCoordinate');
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
+scene.background = new THREE.Color(0x0e382b);
 
 const camera = new THREE.PerspectiveCamera(
   42,
@@ -115,6 +146,7 @@ const camera = new THREE.PerspectiveCamera(
 setInitialCameraPosition();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setClearColor(0x0e382b, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(sceneElement.clientWidth, sceneElement.clientHeight);
 sceneElement.appendChild(renderer.domElement);
@@ -152,7 +184,7 @@ const cubeGroup = new THREE.Group();
 scene.add(cubeGroup);
 
 // Version 1.22.29: the optional wireframe now shows only the twelve outer
-// edges of the main cube, rather than the full internal 3D cell grid. It is
+// edges of the board bounding box, rather than the full internal cell grid. It is
 // visual-only and is not a raycasting target.
 const wireframeGroup = new THREE.Group();
 wireframeGroup.visible = false;
@@ -171,9 +203,10 @@ function rebuildWireframe() {
     child.geometry.dispose();
   }
 
-  const size = SIZE * spacing;
+  const width = SIZE * spacing;
+  const depth = BOARD_DEPTH * spacing;
   const geometry = new THREE.EdgesGeometry(
-    new THREE.BoxGeometry(size, size, size)
+    new THREE.BoxGeometry(width, width, depth)
   );
   const lines = new THREE.LineSegments(geometry, wireframeMaterial);
   lines.renderOrder = 2;
@@ -186,6 +219,9 @@ function updateWireframeVisibility() {
 }
 
 rebuildWireframe();
+// Version 1.25.1: apply the initial Wireframe checkbox state here without
+// requesting a render before the render-on-demand state is initialized.
+wireframeGroup.visible = showWireframeToggle.checked;
 
 // Version 1.7.7: the original glossy dark green orientation sphere is the
 // default orientation marker at the A-1-W corner. The optional 3-Axis
@@ -232,9 +268,12 @@ const orientationEdges = new THREE.Group();
 orientationEdges.visible = false;
 
 function addOrientationEdge(axis, material) {
-  const start = new THREE.Vector3(-boardHalfExtent, -boardHalfExtent, -boardHalfExtent);
+  const halfX = boardHalfExtent;
+  const halfY = boardHalfExtent;
+  const halfZ = boardOffsetZ * spacing + 0.625;
+  const start = new THREE.Vector3(-halfX, -halfY, -halfZ);
   const end = start.clone();
-  end[axis] = boardHalfExtent;
+  end[axis] = axis === 'x' ? halfX : axis === 'y' ? halfY : halfZ;
   const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
   orientationEdges.add(new THREE.Line(geometry, material));
 }
@@ -380,7 +419,11 @@ const miniOrientationMarker = new THREE.Mesh(
   miniOrientationMarkerGeometry,
   orientationMarkerMaterial
 );
-miniOrientationMarker.position.set(0, 0, 0);
+// Version 1.25.7: the synchronized Classic guide retains its matching
+// coordinate orientation. Version 1.25.8 moves only the main-board
+// orientation marker to the bottom-left so it matches this guide's
+// synchronized motion while leaving the A–H / 1–8 labels unchanged.
+miniOrientationMarker.position.set(0, BOARD_DEPTH === 1 ? 1.44 : 0, 0);
 axesContent.add(miniOrientationMarker);
 axesGroup.position.set(axesModelCenter, axesModelCenter, axesModelCenter);
 
@@ -390,7 +433,9 @@ const axisColors = {
   z: 0x6f9ee8
 };
 
-function addCoordinateAxis(direction, color) {
+const coordinateAxisArrows = {};
+
+function addCoordinateAxis(axisName, direction, color) {
   const arrow = new THREE.ArrowHelper(
     direction.clone().normalize(),
     new THREE.Vector3(0, 0, 0),
@@ -399,12 +444,22 @@ function addCoordinateAxis(direction, color) {
     0.18,
     0.08
   );
+  coordinateAxisArrows[axisName] = arrow;
   axesContent.add(arrow);
 }
 
-addCoordinateAxis(new THREE.Vector3(1, 0, 0), axisColors.x);
-addCoordinateAxis(new THREE.Vector3(0, 1, 0), axisColors.y);
-addCoordinateAxis(new THREE.Vector3(0, 0, 1), axisColors.z);
+addCoordinateAxis('x', new THREE.Vector3(1, 0, 0), axisColors.x);
+addCoordinateAxis('y', new THREE.Vector3(0, 1, 0), axisColors.y);
+addCoordinateAxis('z', new THREE.Vector3(0, 0, 1), axisColors.z);
+
+function updateCoordinateAxisVisibility() {
+  // Version 1.25.5: Classic 8×8×1 is two-dimensional, so its synchronized
+  // corner model shows only A–H and 1–8. The third/Z axis is omitted.
+  // Version 1.27.12: Classic is visually given cube depth, but its synchronized
+  // coordinate model remains strictly two-dimensional. Do not display the Z
+  // axis or any Z coordinate in the Classic guide.
+  coordinateAxisArrows.z.visible = BOARD_DEPTH !== 1;
+}
 
 
 // Miniature coordinate guide. Its geometry and labels are rebuilt for the
@@ -441,6 +496,7 @@ miniHighlightCube.visible = false;
 axesContent.add(miniHighlightCube);
 
 let miniCellCenters = [];
+let miniZCenters = [];
 let coordinateLabels = [];
 const xLabelLetters = 'ABCDEFGH';
 const zLabelLetters = 'STUVWXYZ';
@@ -468,15 +524,20 @@ function rebuildCoordinateGuide() {
   const end = SIZE === 4 ? 1.42 : 1.44;
   const step = SIZE === 1 ? 0 : (end - start) / (SIZE - 1);
   miniCellCenters = Array.from({ length: SIZE }, (_, i) => start + i * step);
+  const miniZStart = BOARD_DEPTH === 1 ? 0 : start;
+  const miniZEnd = BOARD_DEPTH === 1 ? 0 : end;
+  const miniZStep = BOARD_DEPTH === 1 ? 0 : (miniZEnd - miniZStart) / (BOARD_DEPTH - 1);
+  miniZCenters = Array.from({ length: BOARD_DEPTH }, (_, i) => miniZStart + i * miniZStep);
 
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         const geometry = new THREE.EdgesGeometry(
           new THREE.BoxGeometry(miniCellSize, miniCellSize, miniCellSize)
         );
         const line = new THREE.LineSegments(geometry, miniCubeMaterial);
-        line.position.set(miniCellCenters[x], miniCellCenters[y], miniCellCenters[z]);
+        const visualMiniY = BOARD_DEPTH === 1 ? miniCellCenters[SIZE - 1 - y] : miniCellCenters[y];
+        line.position.set(miniCellCenters[x], visualMiniY, miniZCenters[z]);
         miniCubeGroup.add(line);
         miniCubeEdges.push(line);
       }
@@ -509,14 +570,26 @@ function rebuildCoordinateGuide() {
 
   for (let i = 0; i < SIZE; i++) {
     makeLabel(xLabelLetters[i], new THREE.Vector3(miniCellCenters[i], 0, 0), axisColors.x);
-    makeLabel(String(i + 1), new THREE.Vector3(0, miniCellCenters[i], 0), axisColors.y);
-    makeLabel(zLabelLetters[i], new THREE.Vector3(0, 0, miniCellCenters[i]), axisColors.z);
+    const visualLabelY = BOARD_DEPTH === 1 ? miniCellCenters[SIZE - 1 - i] : miniCellCenters[i];
+    makeLabel(String(i + 1), new THREE.Vector3(0, visualLabelY, 0), axisColors.y);
+  }
+  if (BOARD_DEPTH !== 1) {
+    for (let i = 0; i < BOARD_DEPTH; i++) {
+      makeLabel(zLabelLetters[i], new THREE.Vector3(0, 0, miniZCenters[i]), axisColors.z);
+    }
   }
 }
 
 rebuildCoordinateGuide();
+updateCoordinateAxisVisibility();
 
 function coordinateNotation(x, y, z) {
+  // Version 1.28.16: Classic move notation is strictly two-dimensional.
+  // The internal z=0 layer remains authoritative, but Classic move sequences
+  // must not expose that implementation detail as a third coordinate.
+  if (BOARD_DEPTH === 1) {
+    return `${xLabelLetters[x]} - ${y + 1}`;
+  }
   return `${xLabelLetters[x]} - ${y + 1} - ${zLabelLetters[z]}`;
 }
 
@@ -528,18 +601,23 @@ function updateCoordinateGuideHighlight() {
   }
 
   const [x, y, z] = highlightedLegalKey.split(',').map(Number);
+  const visualMiniY = BOARD_DEPTH === 1 ? miniCellCenters[SIZE - 1 - y] : miniCellCenters[y];
   miniHighlightCube.position.set(
     miniCellCenters[x],
-    miniCellCenters[y],
-    miniCellCenters[z]
+    visualMiniY,
+    miniZCenters[z]
   );
   miniHighlightCube.visible = true;
-  coordinateReadout.textContent = coordinateNotation(x, y, z);
+  // Version 1.25.12: Classic 8×8×1 does not use a Z-axis coordinate,
+  // so its on-screen coordinate readout shows only the A–H / 1–8 pair.
+  coordinateReadout.textContent = BOARD_DEPTH === 1
+    ? `${xLabelLetters[x]} - ${y + 1}`
+    : coordinateNotation(x, y, z);
 }
 
 let board = Array.from({ length: SIZE }, () =>
   Array.from({ length: SIZE }, () =>
-    Array(SIZE).fill(EMPTY)
+    Array(BOARD_DEPTH).fill(EMPTY)
   )
 );
 
@@ -580,6 +658,11 @@ let historyReviewActive = false;
 let opponentMode = 'bot';
 let humanPlayer = BLACK;
 let gameDuration = '5';
+let botDifficulty = 'medium';
+let developerMode = false;
+let bookOpeningsEnabled = true;
+let botDeveloperEntries = [];
+let botDeveloperGameStartedAt = null;
 
 // Version 1.12.3: per-player game clocks. Remaining time is stored independently
 // for each color; the active player's elapsed time is calculated from
@@ -596,15 +679,19 @@ function key(x, y, z) {
 }
 
 function worldPosition(x, y, z) {
+  // Version 1.25.6: Classic 8×8×1 uses the established Reversi coordinate
+  // orientation, with row 1 at the top while A remains on the left. The
+  // underlying board coordinates stay unchanged so rules/history are stable.
+  const visualY = BOARD_DEPTH === 1 ? (SIZE - 1 - y) : y;
   return new THREE.Vector3(
     (x - boardOffset) * spacing,
-    (y - boardOffset) * spacing,
-    (z - boardOffset) * spacing
+    (visualY - boardOffset) * spacing,
+    (z - boardOffsetZ) * spacing
   );
 }
 
 function inside(x, y, z) {
-  return x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE;
+  return x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < BOARD_DEPTH;
 }
 
 function opponent(player) {
@@ -674,7 +761,7 @@ function legalMoves(player) {
   const moves = [];
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         if (isLegalMove(x, y, z, player)) {
           moves.push([x, y, z]);
         }
@@ -715,7 +802,7 @@ function getSurfaceLevel(move) {
   let level = 0;
   if (move[0] === 0 || move[0] === SIZE - 1) level++;
   if (move[1] === 0 || move[1] === SIZE - 1) level++;
-  if (move[2] === 0 || move[2] === SIZE - 1) level++;
+  if (move[2] === 0 || move[2] === BOARD_DEPTH - 1) level++;
   return level;
 }
 
@@ -730,7 +817,7 @@ function getCornerPosition(move, player) {
   let best = 0;
   for (const cx of [0, SIZE - 1]) {
     for (const cy of [0, SIZE - 1]) {
-      for (const cz of [0, SIZE - 1]) {
+      for (const cz of [0, BOARD_DEPTH - 1]) {
         const dx = Math.abs(move[0] - cx);
         const dy = Math.abs(move[1] - cy);
         const dz = Math.abs(move[2] - cz);
@@ -748,6 +835,61 @@ function getCornerPosition(move, player) {
     }
   }
   return best;
+}
+
+function updateBotDeveloperPanel() {
+  if (!botDeveloperPanel || !botDeveloperOutput) return;
+  botDeveloperPanel.hidden = !developerMode || opponentMode !== 'bot';
+  if (!developerMode || opponentMode !== 'bot') return;
+
+  const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
+  const lines = [
+    `Cube Reversi Bot Developer Summary — Version 1.28.22`,
+    `Board: ${boardLabel}`,
+    `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
+    `Browser: ${navigator.userAgent}`,
+    `Moves recorded: ${botDeveloperEntries.length}`,
+    ''
+  ];
+
+  if (botDeveloperEntries.length) {
+    lines.push('Move | Color | Coordinate | Source | Opening | Time (ms) | Depth | Target | Nodes | Leaves | Cutoffs | TT');
+    for (const entry of botDeveloperEntries) {
+      const source = entry.source || 'SEARCH';
+      const opening = entry.bookName || '';
+      lines.push(`${entry.moveNumber} | ${entry.color} | ${entry.coordinate} | ${source} | ${opening} | ${entry.timeMs} | ${entry.depth} | ${entry.targetDepth} | ${entry.nodes} | ${entry.leaves} | ${entry.cutoffs} | ${entry.tableEntries}`);
+    }
+    const totalMs = botDeveloperEntries.reduce((sum, entry) => sum + entry.timeMs, 0);
+    const averageMs = totalMs / botDeveloperEntries.length;
+    const averageDepth = botDeveloperEntries.reduce((sum, entry) => sum + entry.depth, 0) / botDeveloperEntries.length;
+    lines.push('');
+    lines.push(`Total Bot search time: ${totalMs.toFixed(1)} ms`);
+    lines.push(`Average Bot move time: ${averageMs.toFixed(1)} ms`);
+    lines.push(`Average completed depth: ${averageDepth.toFixed(2)}`);
+  } else {
+    lines.push('No Bot moves recorded yet.');
+  }
+
+  botDeveloperOutput.value = lines.join('\n');
+}
+
+function resetBotDeveloperSummary() {
+  botDeveloperEntries = [];
+  botDeveloperGameStartedAt = performance.now();
+  updateBotDeveloperPanel();
+}
+
+async function copyBotDeveloperSummary() {
+  if (!botDeveloperOutput) return;
+  try {
+    await navigator.clipboard.writeText(botDeveloperOutput.value);
+    const original = copyBotDeveloperButton.textContent;
+    copyBotDeveloperButton.textContent = 'Copied';
+    window.setTimeout(() => { copyBotDeveloperButton.textContent = original; }, 1200);
+  } catch {
+    botDeveloperOutput.focus();
+    botDeveloperOutput.select();
+  }
 }
 
 function scheduleBotTurn() {
@@ -786,19 +928,54 @@ function scheduleBotTurn() {
       };
     });
 
+    const botSearchStartedAt = performance.now();
     const move = chooseMove(moveOptions, {
       boardSize: SIZE,
-      player: currentPlayer
+      boardDepth: BOARD_DEPTH,
+      player: currentPlayer,
+      difficulty: botDifficulty,
+      board: board.map((plane) => plane.map((row) => row.slice()))
     });
+    const botSearchTimeMs = performance.now() - botSearchStartedAt;
+    const searchStats = chooseMove.lastSearchStats || {};
+
+    if (developerMode) {
+      botDeveloperEntries.push({
+        moveNumber: moveSequenceHistory.length + 1,
+        color: currentPlayer === BLACK ? 'Black' : 'White',
+        coordinate: coordinateNotation(move[0], move[1], move[2]),
+        timeMs: Number(botSearchTimeMs.toFixed(1)),
+        depth: searchStats.completedDepth ?? 0,
+        targetDepth: searchStats.targetDepth ?? 0,
+        nodes: searchStats.nodes ?? 0,
+        leaves: searchStats.leaves ?? 0,
+        cutoffs: searchStats.cutoffs ?? 0,
+        tableEntries: searchStats.tableEntries ?? 0,
+        source: searchStats.source || 'SEARCH',
+        bookName: searchStats.bookName || ''
+      });
+      updateBotDeveloperPanel();
+    }
+
     playMove(move[0], move[1], move[2], true);
   }, 250);
 }
 
 function makeInitialPosition() {
-  // Central 2×2×2 block: four black and four white. The same opening
-  // geometry is centered automatically for every supported even board size.
   const low = SIZE / 2 - 1;
   const high = SIZE / 2;
+
+  if (BOARD_DEPTH === 1) {
+    // Version 1.28.12: restore the standard Classic Reversi opening
+    // orientation: Black on E-4 and D-5; White on D-4 and E-5.
+    board[low][low][0] = WHITE;
+    board[low][high][0] = BLACK;
+    board[high][low][0] = BLACK;
+    board[high][high][0] = WHITE;
+    return;
+  }
+
+  // Central 2×2×2 block: four black and four white on 3D boards.
   const start = [
     [low, low, low, BLACK],
     [low, low, high, WHITE],
@@ -859,7 +1036,7 @@ function updatePieces() {
 
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         if (board[x][y][z] !== EMPTY) {
           createPiece(x, y, z, board[x][y][z]);
         }
@@ -885,12 +1062,18 @@ function buildOccupiedSurfaceGeometry() {
 
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         if (board[x][y][z] === EMPTY) continue;
 
         const center = worldPosition(x, y, z);
 
-        for (const face of faces) {
+        // Version 1.27.12: Classic uses the same complete six-face occupied
+        // cube shell as the true 3D boards. The difference is visual only: the
+        // Classic camera is slightly elevated so this shell has visible depth,
+        // while the logical board remains BOARD_DEPTH === 1.
+        const facesToRender = faces;
+
+        for (const face of facesToRender) {
           const nx = x + face.d[0];
           const ny = y + face.d[1];
           const nz = z + face.d[2];
@@ -898,10 +1081,17 @@ function buildOccupiedSurfaceGeometry() {
           const neighborOccupied =
             nx >= 0 && nx < SIZE &&
             ny >= 0 && ny < SIZE &&
-            nz >= 0 && nz < SIZE &&
+            nz >= 0 && nz < BOARD_DEPTH &&
             board[nx][ny][nz] !== EMPTY;
 
-          if (neighborOccupied) continue;
+          // Version 1.27.19: Classic intentionally keeps every face of every
+          // occupied cube, including faces shared with another occupied cube.
+          // Classic is a single logical z=0 layer, so these internal faces do
+          // not hide any cubes behind the occupied structure. Keeping them
+          // gives every occupied cell a complete closed cube surface while the
+          // existing translucent material still allows the spheres to show.
+          // True 3D boards retain the established shared-face omission.
+          if (BOARD_DEPTH !== 1 && neighborOccupied) continue;
 
           const quad = face.c.map(([px, py, pz]) => [
             center.x + px * 2 * half,
@@ -937,14 +1127,16 @@ function updateOccupiedSurface() {
     occupiedSurface.material.dispose();
   }
 
+  // Version 1.27.19: restore the transparent occupied-surface renderer used
+  // before the failed 1.27.17 opaque experiment. Classic remains logically
+  // 8×8×1; its visual camera/synchronized-model behavior is unchanged.
+  // No separate Classic material path is introduced here.
   const geometry = buildOccupiedSurfaceGeometry();
   const material = new THREE.MeshBasicMaterial({
     color: 0x39a96b,
     transparent: true,
     opacity: 0.50,
     side: THREE.DoubleSide,
-    // Write occupied-cell depth so transparent legal surfaces behind an
-    // occupied green surface cannot visually bleed through it.
     depthWrite: true,
     renderOrder: 0
   });
@@ -954,7 +1146,6 @@ function updateOccupiedSurface() {
   cubeGroup.add(occupiedSurface);
   requestRender();
 }
-
 
 function buildSurfaceGeometryForCells(cellSet, excludedKey = null) {
   const positions = [];
@@ -984,7 +1175,10 @@ function buildSurfaceGeometryForCells(cellSet, excludedKey = null) {
         z + face.d[2]
       );
 
-      if (cellSet.has(neighborKey)) continue;
+      // Classic is a single logical layer, so its blue cubes intentionally
+      // keep shared/internal faces to render as closed translucent cubes.
+      // True 3D boards retain the established merged outer-shell behavior.
+      if (BOARD_DEPTH !== 1 && cellSet.has(neighborKey)) continue;
 
       const quad = face.c.map(([px, py, pz]) => [
         center.x + px * 2 * half,
@@ -1038,35 +1232,69 @@ function updateLastMoveMarker() {
   requestRender();
 }
 
-function updateLegalHighlightSurface() {
-  if (legalHighlightSurface) {
-    cubeGroup.remove(legalHighlightSurface);
-    legalHighlightSurface.geometry.dispose();
-    legalHighlightSurface.material.dispose();
-    legalHighlightSurface = null;
+function isAdjacentToUnoccupiedCorner(x, y, z) {
+  // The orange corner warning is only a feature of the true 3D 6×6×6 and
+  // 8×8×8 boards. Classic 8×8×1 is a flat Reversi board and never uses it.
+  if (BOARD_DEPTH !== SIZE || (SIZE !== 6 && SIZE !== 8)) return false;
+
+  // A 3D cube corner has 7 directly adjacent cells: the 3 edge neighbors,
+  // 3 face-diagonal neighbors, and 1 body-diagonal neighbor. Test against
+  // every corner so this works for both 6×6×6 and 8×8×8 coordinates without
+  // hard-coding the coordinate values for either board size. The warning is
+  // only useful while the adjacent corner itself is still empty.
+
+  const last = SIZE - 1;
+  for (const cx of [0, last]) {
+    for (const cy of [0, last]) {
+      for (const cz of [0, last]) {
+        const dx = Math.abs(x - cx);
+        const dy = Math.abs(y - cy);
+        const dz = Math.abs(z - cz);
+        if (dx <= 1 && dy <= 1 && dz <= 1 && (dx + dy + dz) > 0) {
+          if (board[cx][cy][cz] === EMPTY) return true;
+        }
+      }
+    }
   }
 
+  return false;
+}
+
+function updateLegalHighlightSurface() {
   if (!highlightedLegalKey) {
+    if (legalHighlightSurface) {
+      legalHighlightSurface.visible = false;
+    }
     updateCoordinateGuideHighlight();
     return;
   }
 
   const [x, y, z] = highlightedLegalKey.split(',').map(Number);
-  const geometry = new THREE.BoxGeometry(1.25, 1.25, 1.25);
-  const material = new THREE.MeshBasicMaterial({
-    color: 0xffff00,
-    transparent: false,
-    opacity: 1.0,
-    side: THREE.DoubleSide,
-    depthWrite: true
-  });
+  // Version 1.25.5: keep one highlight mesh and move/update it instead of
+  // removing and recreating the mesh on every pointermove. This prevents
+  // rapid cursor movement from producing visible highlight flashes.
+  if (!legalHighlightSurface) {
+    const geometry = new THREE.BoxGeometry(1.25, 1.25, 1.25);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      transparent: false,
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      depthWrite: true
+    });
+    legalHighlightSurface = new THREE.Mesh(geometry, material);
+    // Keep the highlight exactly within the selected cube's bounds.
+    legalHighlightSurface.scale.setScalar(1);
+    cubeGroup.add(legalHighlightSurface);
+  }
 
-  legalHighlightSurface = new THREE.Mesh(geometry, material);
+  // Version 1.25.5: orange-gold is used only for legal cubes adjacent to an
+  // unoccupied corner on true 3D 6×6×6 and 8×8×8 boards. Classic 8×8×1
+  // always uses the normal yellow highlight.
+  const highlightColor = isAdjacentToUnoccupiedCorner(x, y, z) ? 0xffb000 : 0xffff00;
+  legalHighlightSurface.material.color.setHex(highlightColor);
   legalHighlightSurface.position.copy(worldPosition(x, y, z));
-  // Keep the yellow highlight exactly within the selected cube's bounds.
-  // The previous 1.08 scale enlarged it into neighboring cells.
-  legalHighlightSurface.scale.setScalar(1);
-  cubeGroup.add(legalHighlightSurface);
+  legalHighlightSurface.visible = true;
   updateCoordinateGuideHighlight();
 }
 
@@ -1076,7 +1304,7 @@ function getLegalSurfaceOpacity() {
   const secondStageOpacity = 0.1125;
   const maximumOpacity = 0.50;
   const minimumOccupied = 8;
-  const maximumOccupied = SIZE * SIZE * SIZE;
+  const maximumOccupied = SIZE * SIZE * BOARD_DEPTH;
 
   const progress = Math.min(
     1,
@@ -1371,7 +1599,7 @@ function handleTimeout() {
   const winner = opponent(timedOutPlayer);
   const timedOutName = timedOutPlayer === BLACK ? 'Black' : 'White';
   const winnerName = winner === BLACK ? 'Black' : 'White';
-  const totalPositions = SIZE * SIZE * SIZE;
+  const totalPositions = SIZE * SIZE * BOARD_DEPTH;
   const score = winner === BLACK ? `${totalPositions}-0` : `0-${totalPositions}`;
 
   moveSequenceHistory.push(timedOutPlayer === BLACK ? 'TIMEOUT-BLACK' : 'TIMEOUT-WHITE');
@@ -1407,7 +1635,7 @@ function updateStatus() {
 
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         if (board[x][y][z] === BLACK) black++;
         if (board[x][y][z] === WHITE) white++;
         if (board[x][y][z] === EMPTY) empty++;
@@ -1436,13 +1664,31 @@ function updateStatus() {
 
   scoreLabel.textContent = `Black ${black} · White ${white}`;
   emptySpacesLabel.textContent = `Spaces Remaining: ${empty}`;
+  botDifficultyLabel.textContent = opponentMode === 'bot' ? `Bot: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}` : '';
+  botDifficultyLabel.hidden = opponentMode !== 'bot';
+  updateResignButton();
   updateClockDisplay();
+  updateBotDeveloperPanel();
 }
 
 function parseCoordinateNotation(value) {
   const compact = value.toUpperCase().replace(/\s+/g, '');
   const xLetters = xLabelLetters.slice(0, SIZE);
-  const zLetters = zLabelLetters.slice(0, SIZE);
+
+  // Version 1.25.10: Classic 8×8×1 uses the standard two-part A-H / 1-8
+  // coordinate notation. Internally it still uses z=0 so the authoritative
+  // 3D board representation and move rules do not need a separate pathway.
+  if (BOARD_DEPTH === 1) {
+    const match = compact.match(new RegExp(`^([${xLetters}])-(\\d+)$`));
+    if (!match) return null;
+
+    const x = xLetters.indexOf(match[1]);
+    const y = Number(match[2]) - 1;
+    if (x < 0 || y < 0 || y >= SIZE) return null;
+    return [x, y, 0];
+  }
+
+  const zLetters = zLabelLetters.slice(0, BOARD_DEPTH);
   const match = compact.match(new RegExp(`^([${xLetters}])-(\\d+)-([${zLetters}])$`));
   if (!match) return null;
 
@@ -1455,9 +1701,172 @@ function parseCoordinateNotation(value) {
 
 
 
+// -----------------------------------------------------------------------------
+// Classic Opening Recognition — Version 1.28.22
+// -----------------------------------------------------------------------------
+// This catalog is display-only. It does not change Bot move selection. It
+// recognizes established named openings and named continuations from the
+// current move sequence, including all eight board symmetries.
+const CLASSIC_OPENING_RECOGNITION_LINES = [
+  { opening: 'Perpendicular', moves: 'F5 D6' },
+  { opening: 'Tiger', moves: 'F5 D6 C3 D3 C4' },
+  { opening: 'Tiger', variation: 'Aubrey / Tanaka', moves: 'F5 D6 C3 D3 C4 F4 C5 B3' },
+  { opening: 'Tiger', variation: 'Rose-Bill', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2' },
+  { opening: 'Tiger', variation: 'Tamenori', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E6' },
+  { opening: 'Tiger', variation: "Leader's Tiger", moves: 'F5 D6 C3 D3 C4 F4 E6' },
+  { opening: 'Tiger', variation: 'Stephenson', moves: 'F5 D6 C3 D3 C4 F4 F6' },
+  { opening: 'Horse', moves: 'F5 D6 C5 F4 D3' },
+  { opening: 'Rose', moves: 'F5 D6 C5 F4 E3 C6 D3 F6 E6 D7' },
+  { opening: 'Rose', variation: 'Ralle', moves: 'F5 D6 C5 F4 E3 C6 D3 F3' },
+  { opening: 'Rose', variation: 'Inoue', moves: 'F5 D6 C5 F4 E3 C6 E6' },
+  { opening: 'Rose', variation: 'Shaman / Danish', moves: 'F5 D6 C5 F4 E3 C6 F3' },
+  { opening: 'Rose', variation: 'Bhagat', moves: 'F5 D6 C5 F4 E3 C6 D7' },
+  { opening: 'Rose', variation: 'Mimura', moves: 'F5 D6 C5 F4 E3 D3' },
+  { opening: 'Buffalo', moves: 'F5 F6 E6 D6 C3' },
+  { opening: 'Buffalo', variation: 'Hokuriku Buffalo', moves: 'F5 F6 E6 D6 C3 D3' },
+  { opening: 'Buffalo', variation: 'Tanida Buffalo', moves: 'F5 F6 E6 D6 C3 F4 C6 D3 E3 D2' },
+  { opening: 'Buffalo', variation: 'Maruoka Buffalo', moves: 'F5 F6 E6 D6 C3 G4 C6' },
+  { opening: 'Buffalo', variation: 'Kenichi Variation', moves: 'F5 F6 E6 D6 C3' },
+  { opening: 'Heath', moves: 'F5 F6 E6 D6 E7' },
+  { opening: 'Heath', variation: 'Heath-Chimney / Mass-Turning', moves: 'F5 F6 E6 D6 E7 F4' },
+  { opening: 'Heath', variation: 'Heath-Bat', moves: 'F5 F6 E6 D6 E7 G5 C5' },
+  { opening: 'Heath', variation: 'Iwasaki', moves: 'F5 F6 E6 D6 E7 G5 G4' },
+  { opening: 'Heath', variation: 'Mimura II', moves: 'F5 F6 E6 D6 E7 G5 G6 E3 C5 C6 D3 C4 B3' },
+  { opening: 'Diagonal', moves: 'F5 F6' },
+  { opening: 'Diagonal', variation: 'Semi-Wing', moves: 'F5 F6 C4 F4' },
+  { opening: 'Diagonal', variation: 'Wing', moves: 'F5 F6 D3 F4' },
+  { opening: 'Cow', moves: 'F5 F6 E6 D6 C5' },
+  { opening: 'Chimney', moves: 'F5 F6 E6 D6 C5 F4' },
+  { opening: 'Lollipop', moves: 'F5 F6 E6 D6 C7 F4' },
+  { opening: 'Raccoon Dog', moves: 'F5 F6 E6 D6 D7' },
+  { opening: 'Snake / Peasant', moves: 'F5 F6 E6 D6 F7' },
+  { opening: 'X-square', moves: 'F5 F6 E6 D6 G7' },
+  { opening: 'Parallel', moves: 'F5 F4' },
+  { opening: 'Parallel', variation: 'Mouse', moves: 'F5 F4 E3 D6 F3' }
+];
+
+function transformClassicRecognitionCoord(x, y, transform) {
+  switch (transform) {
+    case 0: return [x, y];
+    case 1: return [7 - y, x];
+    case 2: return [7 - x, 7 - y];
+    case 3: return [y, 7 - x];
+    case 4: return [7 - x, y];
+    case 5: return [7 - y, 7 - x];
+    case 6: return [x, 7 - y];
+    case 7: return [y, x];
+    default: return [x, y];
+  }
+}
+
+function parseClassicRecognitionHistory(history) {
+  const moves = history.filter((entry) => /^[A-H]-\d+$/i.test(entry));
+  return moves.map((entry) => {
+    const match = /^([A-H])-(\d+)$/i.exec(entry.replace(/\s+/g, ''));
+    return [match[1].toUpperCase().charCodeAt(0) - 65, Number(match[2]) - 1];
+  });
+}
+
+function recognitionLineMatches(historyMoves, lineMoves) {
+  if (historyMoves.length > lineMoves.length) return false;
+
+  for (let transform = 0; transform < 8; transform++) {
+    let matches = true;
+    for (let index = 0; index < historyMoves.length; index++) {
+      const [hx, hy] = historyMoves[index];
+      const [lx, ly] = lineMoves[index];
+      const [tx, ty] = transformClassicRecognitionCoord(lx, ly, transform);
+      if (hx !== tx || hy !== ty) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+function getRecognizedClassicOpening(history) {
+  if (BOARD_DEPTH !== 1 || SIZE !== 8) return null;
+  // PASS does not end the game; keep the educational opening label through passes.
+  // Resignation and timeout remain terminal states and do not need an opening label.
+  if (history.some((entry) => /^(RESIGN|TIMEOUT)-/.test(entry))) return null;
+
+  const historyMoves = parseClassicRecognitionHistory(history);
+  // The first Black move is completely interchangeable under board symmetry.
+  // Do not assign an opening family until White has made the second move.
+  if (historyMoves.length < 2) return null;
+
+  // Base openings may be recognized from the deepest named prefix that has
+  // actually been reached. This is intentionally different from variations:
+  // a base opening such as Rose can be shown once its five-move prefix has
+  // been played, even if the player then leaves the catalogued Rose line.
+  // Named variations still require their complete defining sequence before
+  // they are displayed, preventing premature labels such as Tamenori.
+  const candidates = CLASSIC_OPENING_RECOGNITION_LINES.map((line) => {
+    const lineMoves = line.moves.split(/\s+/).map((token) => [
+      token.charCodeAt(0) - 65,
+      Number(token[1]) - 1
+    ]);
+
+    if (line.variation) {
+      if (lineMoves.length > historyMoves.length) return null;
+      if (!recognitionLineMatches(historyMoves.slice(0, lineMoves.length), lineMoves)) return null;
+      return { line, matchedDepth: lineMoves.length, exact: true };
+    }
+
+    const maxDepth = Math.min(historyMoves.length, lineMoves.length);
+    let matchedDepth = 0;
+    for (let depth = 2; depth <= maxDepth; depth++) {
+      if (!recognitionLineMatches(historyMoves.slice(0, depth), lineMoves.slice(0, depth))) break;
+      matchedDepth = depth;
+    }
+
+    if (matchedDepth < 2) return null;
+    return { line, matchedDepth, exact: historyMoves.length >= lineMoves.length && matchedDepth === lineMoves.length };
+  }).filter(Boolean);
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => {
+    const depth = b.matchedDepth - a.matchedDepth;
+    if (depth) return depth;
+
+    // Prefer a fully reached line over a still-growing prefix at the same
+    // depth, then prefer a named variation when both are equally deep.
+    const exact = Number(b.exact) - Number(a.exact);
+    if (exact) return exact;
+    const variation = Number(Boolean(b.line.variation)) - Number(Boolean(a.line.variation));
+    return variation || a.line.opening.localeCompare(b.line.opening);
+  });
+
+  return candidates[0].line;
+}
+function updateBookOpeningLabel() {
+  if (!bookOpeningLabel) return;
+  if (!bookOpeningsEnabled || BOARD_DEPTH !== 1 || SIZE !== 8) {
+    bookOpeningLabel.hidden = true;
+    bookOpeningLabel.textContent = '';
+    return;
+  }
+
+  const recognized = getRecognizedClassicOpening(moveSequenceHistory);
+  if (!recognized) {
+    bookOpeningLabel.hidden = true;
+    bookOpeningLabel.textContent = '';
+    return;
+  }
+
+  bookOpeningLabel.textContent = recognized.variation
+    ? `Opening: ${recognized.opening} - ${recognized.variation}`
+    : `Opening: ${recognized.opening}`;
+  bookOpeningLabel.hidden = false;
+}
+
 function updateMoveSequenceDisplay() {
   moveSequence.value = moveSequenceHistory.join(', ');
   moveSequence.scrollTop = moveSequence.scrollHeight;
+  updateBookOpeningLabel();
 }
 
 function updateUndoButton() {
@@ -1477,6 +1886,10 @@ function updateRedoButton() {
     return;
   }
   redoButton.disabled = redoHistory.length === 0;
+}
+
+function updateResignButton() {
+  resignButton.disabled = gameCompleteActive;
 }
 
 function createGameSnapshot() {
@@ -1520,7 +1933,7 @@ function deriveCurrentPlayerFromHistory(history, fallbackPlayer) {
 function restoreGameSnapshot(snapshot) {
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         board[x][y][z] = snapshot.board[x][y][z];
       }
     }
@@ -1639,7 +2052,7 @@ function redoMove() {
   // check protects the completed-game state from being lost during history
   // review transitions.
   const occupiedAfterRedo = board.flat(2).filter((value) => value !== EMPTY).length;
-  if (occupiedAfterRedo === SIZE * SIZE * SIZE ||
+  if (occupiedAfterRedo === SIZE * SIZE * BOARD_DEPTH ||
       (legalMoves(BLACK).length === 0 && legalMoves(WHITE).length === 0)) {
     gameCompleteActive = true;
     passMessageActive = false;
@@ -1704,6 +2117,9 @@ function showLoadSequencePanel(fromStartScreen = false) {
   if (fromStartScreen) {
     hideStartScreen();
   }
+  // Version 1.28.7: every opening starts with an empty sequence field so a
+  // previous test sequence cannot remain in the loader.
+  loadSequenceInput.value = '';
   loadSequenceError.textContent = '';
   loadSequenceOverlay.classList.add('visible');
   loadSequenceOverlay.setAttribute('aria-hidden', 'false');
@@ -1736,6 +2152,25 @@ function hideLoadSequence() {
   }
 }
 
+function sequenceUsesClassicTwoPartCoordinates(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const tokens = trimmed.split(',').map((token) => token.trim().toUpperCase());
+  const coordinateTokens = tokens.filter((token) => {
+    return token !== 'PASS' &&
+      !/^RESIGN-(BLACK|WHITE)$/.test(token) &&
+      !/^TIMEOUT-(BLACK|WHITE)$/.test(token);
+  });
+
+  // A sequence containing only standard two-part A-H / 1-8 coordinates is
+  // unambiguously a Classic 8×8×1 sequence. This is especially important when
+  // Load Sequence is opened directly from the Start Menu, because the active
+  // board is otherwise still the default 4×4×4 board at that point.
+  if (!coordinateTokens.length) return false;
+  return coordinateTokens.every((token) => /^[A-H]-\d+$/i.test(token));
+}
+
 function parseMoveSequenceText(text) {
   const trimmed = text.trim();
   if (!trimmed) return { tokens: [], error: 'Enter a move sequence.' };
@@ -1765,7 +2200,7 @@ function parseMoveSequenceText(text) {
 function resetBoardForSequenceLoad() {
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         board[x][y][z] = EMPTY;
       }
     }
@@ -1779,6 +2214,7 @@ function resetBoardForSequenceLoad() {
   passMessage.textContent = '';
   passOverlay.classList.remove('visible');
   moveSequenceHistory = [];
+  updateBookOpeningLabel();
   undoHistory = [];
   redoHistory = [];
   historyReviewActive = false;
@@ -1787,6 +2223,14 @@ function resetBoardForSequenceLoad() {
 }
 
 function loadMoveSequence() {
+  // Version 1.28.3: a two-part X-Y move sequence is the application's Classic
+  // 8×8×1 notation. Select that board before parsing so sequences loaded from
+  // the Start Menu (or from a previously completed 3D game) are interpreted
+  // correctly instead of being rejected as missing a Z coordinate.
+  if (sequenceUsesClassicTwoPartCoordinates(loadSequenceInput.value)) {
+    if (SIZE !== 8 || BOARD_DEPTH !== 1) rebuildBoardForSize('8x8x1');
+  }
+
   const parsed = parseMoveSequenceText(loadSequenceInput.value);
   if (parsed.error) {
     loadSequenceError.textContent = parsed.error;
@@ -1898,7 +2342,7 @@ function loadMoveSequence() {
     lastMoveMarkerKey = key(x, y, z);
 
     const occupiedCount = board.flat(2).filter((value) => value !== EMPTY).length;
-    if (occupiedCount === SIZE * SIZE * SIZE) {
+    if (occupiedCount === SIZE * SIZE * BOARD_DEPTH) {
       lastMoveMarkerKey = null;
       gameCompleteActive = true;
       continue;
@@ -1963,9 +2407,19 @@ function loadMoveSequence() {
   showLoadedSequenceChoice();
 }
 
+function updateLoadedSequenceDifficultyVisibility() {
+  const selectedMode = document.querySelector('input[name="loadedPlayerMode"]:checked')?.value || 'both';
+  const botMode = selectedMode !== 'both';
+  loadedBotDifficultyFieldset.classList.toggle('start-hidden', !botMode);
+  loadedBotDifficultyFieldset.hidden = !botMode;
+}
+
 function showLoadedSequenceChoice() {
   const defaultChoice = document.querySelector('input[name="loadedPlayerMode"][value="both"]');
   if (defaultChoice) defaultChoice.checked = true;
+  const defaultDifficulty = document.querySelector(`input[name="loadedBotDifficulty"][value="${botDifficulty}"]`);
+  if (defaultDifficulty) defaultDifficulty.checked = true;
+  updateLoadedSequenceDifficultyVisibility();
   loadedSequenceChoiceOverlay.classList.add('visible');
   loadedSequenceChoiceOverlay.setAttribute('aria-hidden', 'false');
   loadedSequenceChoiceContinue.focus();
@@ -1990,7 +2444,12 @@ function continueLoadedSequence() {
     humanPlayer = BLACK;
   }
 
+  if (selectedMode !== 'both') {
+    botDifficulty = document.querySelector('input[name="loadedBotDifficulty"]:checked')?.value || botDifficulty;
+  }
+
   hideLoadedSequenceChoice();
+  resetBotDeveloperSummary();
 
   // Loaded sequences never use the game clock. The sequence does not carry
   // reliable timing information, so leave the clock removed for the loaded
@@ -2069,6 +2528,8 @@ function handleCoordinateInputKey(event) {
     // deleting a hyphen that the input system normally inserts itself.
     if (length === 1 || length === 2) {
       moveCoordinateInput.value = '';
+    } else if (BOARD_DEPTH === 1) {
+      moveCoordinateInput.value = value.slice(0, 2);
     } else if (length === 3 || length === 4) {
       moveCoordinateInput.value = value.slice(0, 2);
     } else {
@@ -2080,7 +2541,7 @@ function handleCoordinateInputKey(event) {
   if (event.key === 'Enter') {
     event.preventDefault();
 
-    if (length === 5) {
+    if ((BOARD_DEPTH === 1 && length === 3) || (BOARD_DEPTH !== 1 && length === 5)) {
       submitCoordinateMove();
     }
 
@@ -2090,12 +2551,14 @@ function handleCoordinateInputKey(event) {
   let accepted = null;
 
   const xLetters = xLabelLetters.slice(0, SIZE);
-  const zLetters = zLabelLetters.slice(0, SIZE);
+  const zLetters = zLabelLetters.slice(0, BOARD_DEPTH);
   if (length === 0 && new RegExp(`^[${xLetters.toLowerCase()}]$`, 'i').test(event.key)) {
     accepted = event.key.toUpperCase() + '-';
   } else if (length === 2 && /^[1-8]$/.test(event.key) && Number(event.key) <= SIZE) {
-    accepted = value + event.key + '-';
-  } else if (length === 4 && new RegExp(`^[${zLetters}]$`, 'i').test(event.key)) {
+    accepted = BOARD_DEPTH === 1
+      ? value + event.key
+      : value + event.key + '-';
+  } else if (BOARD_DEPTH !== 1 && length === 4 && new RegExp(`^[${zLetters}]$`, 'i').test(event.key)) {
     accepted = value + event.key.toUpperCase();
   }
 
@@ -2123,9 +2586,10 @@ function dismissPassMessage() {
   // being advanced from a stale/changed currentPlayer value, which previously
   // could hand the bot the human's turn or leave the wrong color active.
   const wasGameComplete = gameCompleteActive;
-  if (passMessageActive && !gameCompleteActive) {
-    const passingPlayer = passPlayer ?? currentPlayer;
-    currentPlayer = opponent(passingPlayer);
+  // Only a genuine PASS has a passPlayer. An unavailable coordinate-entry
+  // warning also uses this overlay, but must never advance the turn.
+  if (passMessageActive && !gameCompleteActive && passPlayer !== null) {
+    currentPlayer = opponent(passPlayer);
   }
   passPlayer = null;
   passMessageActive = false;
@@ -2151,7 +2615,7 @@ function handleLoadedTimeoutMessage(timedOutPlayer) {
   const winner = opponent(timedOutPlayer);
   const timedOutName = timedOutPlayer === BLACK ? 'Black' : 'White';
   const winnerName = winner === BLACK ? 'Black' : 'White';
-  const totalPositions = SIZE * SIZE * SIZE;
+  const totalPositions = SIZE * SIZE * BOARD_DEPTH;
   const score = winner === BLACK ? `${totalPositions}-0` : `0-${totalPositions}`;
 
   gameCompleteActive = true;
@@ -2164,7 +2628,7 @@ function showResignationMessage(resignedPlayer) {
   const winner = opponent(resignedPlayer);
   const resignedName = resignedPlayer === BLACK ? 'Black' : 'White';
   const winnerName = winner === BLACK ? 'Black' : 'White';
-  const totalPositions = SIZE * SIZE * SIZE;
+  const totalPositions = SIZE * SIZE * BOARD_DEPTH;
   const score = winner === BLACK ? `${totalPositions}-0` : `0-${totalPositions}`;
 
   passMessage.textContent = `Game Complete\n${resignedName} resigned\n${winnerName} wins\nScore ${score}`;
@@ -2194,7 +2658,7 @@ function showGameComplete() {
 
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         if (board[x][y][z] === BLACK) black++;
         if (board[x][y][z] === WHITE) white++;
       }
@@ -2242,13 +2706,13 @@ function playMove(x, y, z, isBotMove = false) {
   let occupiedCount = 0;
   for (let ix = 0; ix < SIZE; ix++) {
     for (let iy = 0; iy < SIZE; iy++) {
-      for (let iz = 0; iz < SIZE; iz++) {
+      for (let iz = 0; iz < BOARD_DEPTH; iz++) {
         if (board[ix][iy][iz] !== EMPTY) occupiedCount++;
       }
     }
   }
 
-  lastMoveMarkerKey = occupiedCount === SIZE * SIZE * SIZE
+  lastMoveMarkerKey = occupiedCount === SIZE * SIZE * BOARD_DEPTH
     ? null
     : key(x, y, z);
   updateLastMoveMarker();
@@ -2328,19 +2792,30 @@ function confirmResignation() {
 }
 
 function resignGame() {
+  if (gameCompleteActive) return;
   showResignConfirmation();
 }
 
 function updateVersionLabel() {
-  versionLabel.innerHTML = `<span class="version-number">Version 1.23.0</span><span class="version-separator"> · </span><span class="version-board-size">${SIZE}×${SIZE}×${SIZE}</span>`;
-  document.title = `Cube Reversi — 1.23.0`;
+  const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
+  versionLabel.innerHTML = `<span class="version-number">Version 1.28.22</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  document.title = `Cube Reversi — 1.28.21`;
+  moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 
 function rebuildBoardForSize(newSize) {
-  SIZE = newSize;
+  if (newSize === '8x8x1') {
+    SIZE = 8;
+    BOARD_DEPTH = 1;
+  } else {
+    SIZE = Number(newSize);
+    BOARD_DEPTH = SIZE;
+  }
+
   boardOffset = (SIZE - 1) / 2;
+  boardOffsetZ = (BOARD_DEPTH - 1) / 2;
   board = Array.from({ length: SIZE }, () =>
-    Array.from({ length: SIZE }, () => Array(SIZE).fill(EMPTY))
+    Array.from({ length: SIZE }, () => Array(BOARD_DEPTH).fill(EMPTY))
   );
 
   for (const mesh of cellMeshes.values()) {
@@ -2351,7 +2826,7 @@ function rebuildBoardForSize(newSize) {
   cellMeshes.clear();
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         createCell(x, y, z);
       }
     }
@@ -2359,13 +2834,15 @@ function rebuildBoardForSize(newSize) {
 
   rebuildWireframe();
   boardHalfExtent = boardOffset * spacing + 0.625;
-  mainOrientationMarker.position.set(-boardHalfExtent, -boardHalfExtent, -boardHalfExtent);
+  mainOrientationMarker.position.set(-boardHalfExtent, -boardHalfExtent, -boardOffsetZ * spacing - 0.625);
   rebuildOrientationEdges();
   rebuildCoordinateGuide();
+  updateCoordinateAxisVisibility();
   updateCoordinateGuideHighlight();
   setInitialCameraPosition();
   updateControlDistanceLimits();
   updateVersionLabel();
+  requestRender();
 }
 
 function resetBoardForNewGame() {
@@ -2376,7 +2853,7 @@ function resetBoardForNewGame() {
   timeoutHandled = false;
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
-      for (let z = 0; z < SIZE; z++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
         board[x][y][z] = EMPTY;
       }
     }
@@ -2385,6 +2862,15 @@ function resetBoardForNewGame() {
   currentPlayer = BLACK;
   gameCompleteActive = false;
   gameInProgress = true;
+
+  // Version 1.24.1: Green Cubes and Blue Cubes are per-game display
+  // preferences. A completed game may reveal them automatically, but every
+  // newly started game must return both options to their default OFF state.
+  hideGreenCubesToggle.checked = false;
+  if (occupiedSurface) occupiedSurface.visible = false;
+  blueCubesToggle.checked = false;
+  if (legalSurface) legalSurface.visible = false;
+
   setClockPanelVisible(true);
   moveSequenceHistory = [];
   undoHistory = [];
@@ -2406,11 +2892,18 @@ function resetBoardForNewGame() {
 
 function updateStartScreenOptions() {
   const selectedOpponent = document.querySelector('input[name="opponentMode"]:checked')?.value || 'human';
-  colorFieldset.classList.toggle('start-hidden', selectedOpponent === 'human');
+  const colorHidden = selectedOpponent === 'human';
+  colorFieldset.classList.toggle('start-hidden', colorHidden);
+  colorFieldset.hidden = colorHidden;
 
   // Timed games are unavailable in Bot Opponent mode. Remove the duration
   // control entirely rather than leaving a disabled selector taking up space.
   const botModeSelected = selectedOpponent === 'bot';
+  const difficultyFieldset = document.getElementById('difficultyFieldset');
+  if (difficultyFieldset) {
+    difficultyFieldset.classList.toggle('start-hidden', !botModeSelected);
+    difficultyFieldset.hidden = !botModeSelected;
+  }
   gameDurationLabel.classList.toggle('start-hidden', botModeSelected);
   gameDurationSelect.classList.toggle('start-hidden', botModeSelected);
   if (botModeSelected) {
@@ -2436,10 +2929,11 @@ function hideStartScreen() {
   startOverlay.setAttribute('aria-hidden', 'true');
 }
 
-// Version 1.21.2: keyboard navigation for the start menu. Arrow keys move
-// focus through the currently visible start-menu controls. Spacebar cycles
-// the selected radio within its group. Outside the start menu, Spacebar keeps
-// its established Auto-Rotate function.
+// Version 1.21.2 / 1.28.x: keyboard navigation for the start menu. Arrow
+// keys move focus through the currently visible start-menu controls. Spacebar
+// selects the currently focused radio without advancing to another option.
+// Enter always starts the game while the start menu is visible. Outside the
+// start menu, Spacebar keeps its established Auto-Rotate function.
 function getStartMenuFocusableElements() {
   if (!startOverlay.classList.contains('visible')) return [];
 
@@ -2463,34 +2957,33 @@ function moveStartMenuFocus(direction) {
   focusables[nextIndex].focus({ preventScroll: true });
 }
 
-function cycleFocusedRadio() {
-  const activeElement = document.activeElement;
-  if (!activeElement || activeElement.tagName !== 'INPUT' || activeElement.type !== 'radio') {
-    return false;
-  }
-  if (!startOverlay.classList.contains('visible')) return false;
+// Version 1.28.7: keep keyboard focus inside the Load Sequence dialog's
+// intended controls. The textarea is the entry point; Tab advances to Load,
+// then Cancel, and wraps back to the textarea. Shift+Tab reverses the cycle.
+function getLoadSequenceFocusableElements() {
+  if (!loadSequenceOverlay.classList.contains('visible')) return [];
 
-  const radios = Array.from(document.querySelectorAll(`input[name=\"${activeElement.name}\"]`));
-  const visibleRadios = radios.filter((radio) => {
-    if (radio.disabled) return false;
-    if (radio.closest('.start-hidden')) return false;
-    if (radio.offsetParent === null) return false;
-    return true;
-  });
+  return [loadSequenceInput, loadSequenceButtonConfirm, cancelLoadSequenceButton]
+    .filter((element) => element && !element.disabled && !element.hidden);
+}
 
-  if (!visibleRadios.length) return false;
+function moveLoadSequenceFocus(direction) {
+  const focusables = getLoadSequenceFocusableElements();
+  if (!focusables.length) return;
 
-  const currentIndex = Math.max(0, visibleRadios.indexOf(activeElement));
-  const nextRadio = visibleRadios[(currentIndex + 1) % visibleRadios.length];
-  nextRadio.checked = true;
-  nextRadio.dispatchEvent(new Event('change', { bubbles: true }));
-  nextRadio.focus({ preventScroll: true });
-  return true;
+  const currentIndex = focusables.indexOf(document.activeElement);
+  const nextIndex = currentIndex === -1
+    ? 0
+    : (currentIndex + direction + focusables.length) % focusables.length;
+
+  focusables[nextIndex].focus({ preventScroll: true });
 }
 
 function startGameFromSplash() {
-  const selectedSize = Number(document.querySelector('input[name="boardSize"]:checked')?.value || 4);
-  if (selectedSize !== SIZE) rebuildBoardForSize(selectedSize);
+  const selectedSize = document.querySelector('input[name="boardSize"]:checked')?.value || '4';
+  const selectedDepth = selectedSize === '8x8x1' ? 1 : Number(selectedSize);
+  const selectedWidth = 8;
+  if (selectedWidth !== SIZE || selectedDepth !== BOARD_DEPTH) rebuildBoardForSize(selectedSize);
 
   opponentMode = document.querySelector('input[name="opponentMode"]:checked')?.value || 'human';
   const selectedColor = document.querySelector('input[name="playerColor"]:checked')?.value || 'black';
@@ -2500,8 +2993,11 @@ function startGameFromSplash() {
       ? (Math.random() < 0.5 ? BLACK : WHITE)
       : BLACK;
   gameDuration = gameDurationSelect.value;
+  botDifficulty = document.querySelector('input[name="botDifficulty"]:checked')?.value || 'medium';
+  developerMode = !!developerModeToggle?.checked;
 
   gameInProgress = true;
+  resetBotDeveloperSummary();
   resetBoardForNewGame();
   initializeGameClock();
   hideStartScreen();
@@ -2865,7 +3361,33 @@ function startFlipAnimation() {
 }
 
 window.addEventListener('keydown', (event) => {
+  // Version 1.28.7: the Load Sequence dialog gets its own compact keyboard
+  // focus cycle so the normal game's coordinate-entry Tab shortcut cannot
+  // steal focus from its Load and Cancel buttons. Spacebar activates a focused
+  // dialog button instead of toggling Auto-Rotate.
+  if (loadSequenceOverlay.classList.contains('visible')) {
+    if (event.key === 'Tab') {
+      moveLoadSequenceFocus(event.shiftKey ? -1 : 1);
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key === ' ') {
+      const activeElement = document.activeElement;
+      if (activeElement?.tagName === 'BUTTON' && !activeElement.disabled) {
+        activeElement.click();
+        event.preventDefault();
+        return;
+      }
+    }
+  }
+
   if (startOverlay.classList.contains('visible')) {
+    if (event.key === 'Enter') {
+      startGameFromSplash();
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       moveStartMenuFocus(-1);
       event.preventDefault();
@@ -2876,9 +3398,19 @@ window.addEventListener('keydown', (event) => {
       event.preventDefault();
       return;
     }
-    if (event.key === ' ' && cycleFocusedRadio()) {
-      event.preventDefault();
-      return;
+    if (event.key === ' ') {
+      const activeElement = document.activeElement;
+      if (activeElement?.tagName === 'INPUT' && activeElement.type === 'radio') {
+        activeElement.checked = true;
+        activeElement.dispatchEvent(new Event('change', { bubbles: true }));
+        event.preventDefault();
+        return;
+      }
+      if (activeElement?.tagName === 'BUTTON' && !activeElement.disabled) {
+        activeElement.click();
+        event.preventDefault();
+        return;
+      }
     }
   }
 
@@ -2920,28 +3452,38 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (!isEditableTarget && event.key.toLowerCase() === 'x') {
+  // Version 1.25.12: view/display keyboard controls moved away from A-H
+  // coordinate-entry letters. 3 toggles the 3-Axis display.
+  if (!isEditableTarget && event.key === '3') {
     show3AxisToggle.checked = !show3AxisToggle.checked;
     updateOrientationMarkerVisibility();
+    requestRender();
     event.preventDefault();
     return;
   }
 
-  if (!isEditableTarget && event.key.toLowerCase() === 'z') {
+  // Version 1.25.12: L toggles Wireframe.
+  if (!isEditableTarget && event.key.toLowerCase() === 'l') {
     showWireframeToggle.checked = !showWireframeToggle.checked;
     updateWireframeVisibility();
     event.preventDefault();
     return;
   }
 
-  if (!isEditableTarget && event.key.toLowerCase() === 'g') {
+  // Version 1.25.12: J toggles Green Cubes.
+  if (!isEditableTarget && event.key.toLowerCase() === 'j') {
     hideGreenCubesToggle.checked = !hideGreenCubesToggle.checked;
     hideGreenCubesToggle.dispatchEvent(new Event('change'));
     event.preventDefault();
     return;
   }
 
-  if (!isEditableTarget && event.key.toLowerCase() === 'b') {
+  // Version 1.25.12: I toggles Blue Cubes.
+  // Version 1.27.19: I is a global Blue Cubes shortcut. The coordinate-entry
+  // field may have focus, but I is not a valid coordinate character (Classic
+  // uses A–H, and 3D boards also use A–H for X), so the display shortcut can
+  // safely run even when the field is active.
+  if (event.key.toLowerCase() === 'i') {
     blueCubesToggle.checked = !blueCubesToggle.checked;
     blueCubesToggle.dispatchEvent(new Event('change'));
     event.preventDefault();
@@ -2951,6 +3493,27 @@ window.addEventListener('keydown', (event) => {
   if (!isEditableTarget && event.key.toLowerCase() === 'p') {
     bluePulseToggle.checked = !bluePulseToggle.checked;
     bluePulseToggle.dispatchEvent(new Event('change'));
+    event.preventDefault();
+    return;
+  }
+
+  // Version 1.24.6: M activates the existing Undo Move button.
+  if (!isEditableTarget && event.key.toLowerCase() === 'm') {
+    undoMove();
+    event.preventDefault();
+    return;
+  }
+
+  // Version 1.28.7: once global shortcuts that are intentionally allowed in
+  // editable fields have been handled, let the browser and the focused
+  // control process all remaining editing keystrokes normally. This prevents
+  // Ctrl+V in the Load Sequence textarea from reaching the game-view V
+  // shortcut, while preserving the existing global I shortcut above.
+  if (isEditableTarget) return;
+
+  // Version 1.25.1: K activates the existing Redo Move button/action.
+  if (!isEditableTarget && event.key.toLowerCase() === 'k') {
+    redoMove();
     event.preventDefault();
     return;
   }
@@ -2995,16 +3558,18 @@ window.addEventListener('keydown', (event) => {
       case 'ArrowDown':
         cubeGroup.rotation.x += step;
         break;
-      case 'q':
+      // Version 1.25.12: . / / replace Q / E for Roll.
+      case '.':
         cubeGroup.rotation.z -= step;
         break;
-      case 'e':
+      case '/':
         cubeGroup.rotation.z += step;
         break;
       case 'r':
         resetView();
         break;
-      case 'f':
+      // Version 1.25.12: V replaces F for Flip 180°.
+      case 'v':
         startFlipAnimation();
         break;
       case ' ':
@@ -3071,6 +3636,10 @@ startLoadSequenceButton.addEventListener('click', showLoadSequenceFromStartScree
 closeSequenceButton.addEventListener('click', hideMoveSequence);
 copySequenceButton.addEventListener('click', copyMoveSequence);
 loadSequenceButtonConfirm.addEventListener('click', loadMoveSequence);
+loadedPlayerModeInputs.forEach((input) => {
+  input.addEventListener('change', updateLoadedSequenceDifficultyVisibility);
+});
+
 loadedSequenceChoiceContinue.addEventListener('click', continueLoadedSequence);
 cancelLoadSequenceButton.addEventListener('click', hideLoadSequence);
 sequenceOverlay.addEventListener('click', (event) => {
@@ -3134,6 +3703,15 @@ opponentModeInputs.forEach((input) => {
   input.addEventListener('change', updateStartScreenOptions);
 });
 
+developerModeToggle.addEventListener('change', () => {
+  developerMode = developerModeToggle.checked;
+  updateBotDeveloperPanel();
+});
+bookOpeningsToggle.addEventListener('change', () => {
+  bookOpeningsEnabled = bookOpeningsToggle.checked;
+  updateBookOpeningLabel();
+});
+copyBotDeveloperButton.addEventListener('click', copyBotDeveloperSummary);
 startGameButton.addEventListener('click', startGameFromSplash);
 resetButton.addEventListener('click', resetGame);
 brandTitle.addEventListener('click', resetGame);
@@ -3164,7 +3742,7 @@ window.addEventListener('resize', () => {
 
 for (let x = 0; x < SIZE; x++) {
   for (let y = 0; y < SIZE; y++) {
-    for (let z = 0; z < SIZE; z++) {
+    for (let z = 0; z < BOARD_DEPTH; z++) {
       createCell(x, y, z);
     }
   }
