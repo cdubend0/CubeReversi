@@ -3,7 +3,7 @@ import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import { chooseMove } from './CubeReversiBot.js';
 
 /*
- * Cube Reversi 1.28.23
+ * Cube Reversi 1.31.12
  *
  * Multi-size board release:
  * - 4×4×4, 6×6×6, 8×8×8, or 8×8×1 Classic board
@@ -255,6 +255,24 @@ function updateOrientationMarkerVisibility() {
   update3AxisVisibility();
 }
 
+// Version 1.29.0: 8×8×1 Classic is a two-dimensional Reversi board, so the
+// 3-Axis control is not offered for Classic and the 3-key shortcut is disabled.
+function update3AxisControlAvailability() {
+  const threeAxisControl = show3AxisToggle.closest('label');
+  const isClassic = BOARD_DEPTH === 1;
+  if (threeAxisControl) {
+    // Version 1.29.4: Classic must not display the 3-Axis control at all.
+    // Use both the semantic hidden state and an explicit inline display reset
+    // so the control cannot be restored by sidebar toggle styling.
+    threeAxisControl.hidden = isClassic;
+    threeAxisControl.style.display = isClassic ? 'none' : '';
+  }
+  if (isClassic && show3AxisToggle.checked) {
+    show3AxisToggle.checked = false;
+  }
+  updateOrientationMarkerVisibility();
+}
+
 // Optional three-axis alternative. Hidden by default; the sidebar toggle
 // switches between this view and the original green orientation sphere.
 const orientationEdgeMaterials = {
@@ -291,7 +309,8 @@ function rebuildOrientationEdges() {
 
 rebuildOrientationEdges();
 cubeGroup.add(orientationEdges);
-updateOrientationMarkerVisibility();
+update3AxisControlAvailability();
+updateBookOpeningControlAvailability();
 // ---------------------------------------------------------------------------
 // Coordinate-axis model — Version 1.6.1
 // ---------------------------------------------------------------------------
@@ -844,7 +863,7 @@ function updateBotDeveloperPanel() {
 
   const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   const lines = [
-    `Cube Reversi Bot Developer Summary — Version 1.28.23`,
+    `Cube Reversi Bot Developer Summary — Version 1.31.12`,
     `Board: ${boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
     `Browser: ${navigator.userAgent}`,
@@ -866,6 +885,67 @@ function updateBotDeveloperPanel() {
     lines.push(`Total Bot search time: ${totalMs.toFixed(1)} ms`);
     lines.push(`Average Bot move time: ${averageMs.toFixed(1)} ms`);
     lines.push(`Average completed depth: ${averageDepth.toFixed(2)}`);
+
+    // Version 1.31.0: restore the root-candidate diagnostic history from
+    // Version 1.30.3 while retaining the Version 1.30.4 corner-access engine.
+    // Developer Mode can now show how every legal root move ranked at each
+    // completed iterative-deepening depth for every searched Bot move.
+    const searchedEntries = botDeveloperEntries.filter((entry) =>
+      entry.source !== 'BOOK' && entry.rootCandidateScoreHistory?.length
+    );
+    if (searchedEntries.length) {
+      lines.push('');
+      lines.push('Root analysis history — all searched Bot moves');
+      for (const entry of searchedEntries) {
+        lines.push('');
+        lines.push(`Move ${entry.moveNumber} — ${entry.color} ${entry.coordinate} — completed depth ${entry.depth}`);
+        for (const iteration of entry.rootCandidateScoreHistory) {
+          const rankedCandidates = iteration.candidates.slice().sort((a, b) => b.score - a.score);
+          lines.push('');
+          lines.push(`Depth ${iteration.depth}`);
+          lines.push('Rank | Candidate | Score | Best at Depth | Selected');
+          rankedCandidates.forEach((candidate, index) => {
+            const coordinate = coordinateNotation(candidate.move[0], candidate.move[1], candidate.move[2]);
+            const bestAtDepth = index === 0 ? 'YES' : '';
+            const selected = coordinate === entry.coordinate ? 'YES' : '';
+            lines.push(`${index + 1} | ${coordinate} | ${Number(candidate.score).toFixed(2)} | ${bestAtDepth} | ${selected}`);
+            if (candidate.breakdown) {
+              const b = candidate.breakdown;
+              const parts = [
+                `Corners ${Number(b.corners).toFixed(1)}`,
+                `CornerAccess ${Number(b.cornerAccess).toFixed(1)}`,
+                `Mobility ${Number(b.mobility).toFixed(1)}`,
+                `Potential ${Number(b.potential).toFixed(1)}`,
+                `Frontier ${Number(b.frontier).toFixed(1)}`,
+                `Edge ${Number(b.edge).toFixed(1)}`,
+                `EdgeStructure ${Number(b.edgeStructure ?? 0).toFixed(1)}`,
+                `Discs ${Number(b.discs).toFixed(1)}`,
+                `Parity ${Number(b.parity).toFixed(1)}`,
+                `Position ${Number(b.position).toFixed(1)}`,
+                `Stability ${Number(b.stability).toFixed(1)}`
+              ];
+              lines.push(`    Static eval after move: ${Number(b.total).toFixed(2)} | ${parts.join(' | ')}`);
+            }
+          });
+        }
+      }
+    } else {
+      const latest = botDeveloperEntries[botDeveloperEntries.length - 1];
+      if (latest?.rootCandidateScores?.length) {
+        const rankedCandidates = latest.rootCandidateScores.slice().sort((a, b) => b.score - a.score);
+        lines.push('');
+        lines.push(`Latest root analysis — completed depth ${latest.depth}`);
+        lines.push('Rank | Candidate | Score | Selected');
+        rankedCandidates.forEach((candidate, index) => {
+          const coordinate = coordinateNotation(candidate.move[0], candidate.move[1], candidate.move[2]);
+          const selected = coordinate === latest.coordinate ? 'YES' : '';
+          lines.push(`${index + 1} | ${coordinate} | ${Number(candidate.score).toFixed(2)} | ${selected}`);
+        });
+      } else if (latest?.source === 'BOOK') {
+        lines.push('');
+        lines.push('Latest root analysis: opening-book move; search was not used.');
+      }
+    }
   } else {
     lines.push('No Bot moves recorded yet.');
   }
@@ -934,6 +1014,7 @@ function scheduleBotTurn() {
       boardDepth: BOARD_DEPTH,
       player: currentPlayer,
       difficulty: botDifficulty,
+      developerMode,
       board: board.map((plane) => plane.map((row) => row.slice()))
     });
     const botSearchTimeMs = performance.now() - botSearchStartedAt;
@@ -952,7 +1033,25 @@ function scheduleBotTurn() {
         cutoffs: searchStats.cutoffs ?? 0,
         tableEntries: searchStats.tableEntries ?? 0,
         source: searchStats.source || 'SEARCH',
-        bookName: searchStats.bookName || ''
+        bookName: searchStats.bookName || '',
+        rootCandidateScores: Array.isArray(searchStats.rootCandidateScores)
+          ? searchStats.rootCandidateScores.map((candidate) => ({
+              move: candidate.move.slice(),
+              score: candidate.score,
+              breakdown: candidate.breakdown ? { ...candidate.breakdown } : null
+            }))
+          : [],
+        rootCandidateScoreHistory: Array.isArray(searchStats.rootCandidateScoreHistory)
+          ? searchStats.rootCandidateScoreHistory.map((iteration) => ({
+              depth: iteration.depth,
+              candidates: Array.isArray(iteration.candidates)
+                ? iteration.candidates.map((candidate) => ({
+                    move: candidate.move.slice(),
+                    score: candidate.score
+                  }))
+                : []
+            }))
+          : []
       });
       updateBotDeveloperPanel();
     }
@@ -1702,7 +1801,7 @@ function parseCoordinateNotation(value) {
 
 
 // -----------------------------------------------------------------------------
-// Classic Opening Recognition — Version 1.28.23
+// Classic Opening Recognition — Version 1.29.0
 // -----------------------------------------------------------------------------
 // This catalog is display-only. It does not change Bot move selection. It
 // recognizes established named openings and named continuations from the
@@ -1721,6 +1820,23 @@ const CLASSIC_OPENING_RECOGNITION_LINES = [
   { opening: 'Rose', variation: 'Inoue', moves: 'F5 D6 C5 F4 E3 C6 E6' },
   { opening: 'Rose', variation: 'Shaman / Danish', moves: 'F5 D6 C5 F4 E3 C6 F3' },
   { opening: 'Rose', variation: 'Bhagat', moves: 'F5 D6 C5 F4 E3 C6 D7' },
+  { opening: 'Tiger', variation: 'Mainline Tiger', moves: 'F5 D6 C3 D3 C4 F4 C5 B4 B5 C6 F3 E6 E3 G6 F6 G5 D7 G3' },
+  { opening: 'Tiger', variation: 'Rose-Bill', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E3' },
+  { opening: 'Tiger', variation: 'Tamenori', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E6' },
+  { opening: 'Tiger', variation: "Leader's Tiger", moves: 'F5 D6 C3 D3 C4 F4 F6' },
+  { opening: 'Tiger', variation: 'Stephenson', moves: 'F5 D6 C3 D3 C4 F4 F6' },
+  { opening: 'Tiger', variation: 'Kung', moves: 'F5 D6 C3 D3 C4 F4 F6 B4' },
+  { opening: 'Tiger', variation: "Comp'Oth", moves: 'F5 D6 C3 D3 C4 F4 F6 F3' },
+  { opening: 'Tiger', variation: 'No-Kung', moves: 'F5 D6 C3 D3 C4 F4 F6 G5' },
+  { opening: 'Tiger', variation: 'Ganglion', moves: 'F5 D6 C3 G5' },
+  { opening: 'Rose', variation: 'Rose-Birth', moves: 'F5 D6 C5 F4 E3 C6 D3 F6 E6 D7 G3 C4' },
+  { opening: 'Rose', variation: 'Rose-birdie', moves: 'F5 D6 C5 F4 E3 C6 D3 F6 E6 D7 G3 C4 B4' },
+  { opening: 'Cat', moves: 'F5 D6 C4 D3 C5' },
+  { opening: 'Cat', variation: 'Berner', moves: 'F5 D6 C4 D3 C5 F4 E3 F3 C2 B4 B3' },
+  { opening: 'Cat', variation: 'Sakaguchi', moves: 'F5 D6 C4 D3 C5 F4 E3 F3 C2 C6' },
+  { opening: 'Cat', variation: 'Italian', moves: 'F5 D6 C4 D3 E6' },
+  { opening: 'Cat', variation: 'No-Cat', moves: 'F5 D6 C4 G5' },
+  { opening: 'Cat', variation: 'Swallow', moves: 'F5 D6 C4 G5 C6' },
   { opening: 'Rose', variation: 'Mimura', moves: 'F5 D6 C5 F4 E3 D3' },
   { opening: 'Buffalo', moves: 'F5 F6 E6 D6 C3' },
   { opening: 'Buffalo', variation: 'Hokuriku Buffalo', moves: 'F5 F6 E6 D6 C3 D3' },
@@ -1788,9 +1904,8 @@ function recognitionLineMatches(historyMoves, lineMoves) {
 
 function getRecognizedClassicOpening(history) {
   if (BOARD_DEPTH !== 1 || SIZE !== 8) return null;
-  // PASS does not end the game; keep the educational opening label through passes.
-  // Resignation and timeout remain terminal states and do not need an opening label.
-  if (history.some((entry) => /^(RESIGN|TIMEOUT)-/.test(entry))) return null;
+  // PASS, resignation, and timeout do not erase the educational opening label.
+  // They may end the game, but they do not change how the game was opened.
 
   const historyMoves = parseClassicRecognitionHistory(history);
   // The first Black move is completely interchangeable under board symmetry.
@@ -1842,6 +1957,17 @@ function getRecognizedClassicOpening(history) {
 
   return candidates[0].line;
 }
+// Version 1.29.4: Book Openings applies only to 8×8×1 Classic mode, so
+// remove the sidebar control from all other board sizes.
+function updateBookOpeningControlAvailability() {
+  const bookOpeningsControl = bookOpeningsToggle.closest('label');
+  const isClassic = SIZE === 8 && BOARD_DEPTH === 1;
+  if (bookOpeningsControl) {
+    bookOpeningsControl.hidden = !isClassic;
+    bookOpeningsControl.style.display = isClassic ? '' : 'none';
+  }
+}
+
 function updateBookOpeningLabel() {
   if (!bookOpeningLabel) return;
   if (!bookOpeningsEnabled || BOARD_DEPTH !== 1 || SIZE !== 8) {
@@ -2798,8 +2924,8 @@ function resignGame() {
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
-  versionLabel.innerHTML = `<span class="version-number">Version 1.28.23</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
-  document.title = `Cube Reversi — 1.28.23`;
+  versionLabel.innerHTML = `<span class="version-number">Version 1.31.12</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  document.title = `Cube Reversi — 1.31.12`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 
@@ -2838,6 +2964,8 @@ function rebuildBoardForSize(newSize) {
   rebuildOrientationEdges();
   rebuildCoordinateGuide();
   updateCoordinateAxisVisibility();
+  update3AxisControlAvailability();
+  updateBookOpeningControlAvailability();
   updateCoordinateGuideHighlight();
   setInitialCameraPosition();
   updateControlDistanceLimits();
@@ -2893,12 +3021,19 @@ function resetBoardForNewGame() {
 function updateStartScreenOptions() {
   const selectedOpponent = document.querySelector('input[name="opponentMode"]:checked')?.value || 'human';
   const colorHidden = selectedOpponent === 'human';
+
+  // Version 1.29.4: Bot Summary is only meaningful in Bot Opponent mode,
+  // so hide the Start Menu option entirely when Two Player is selected.
+  const developerModeOption = document.getElementById('developerModeOption');
+  const botModeSelected = selectedOpponent === 'bot';
+  if (developerModeOption) {
+    developerModeOption.hidden = !botModeSelected;
+  }
   colorFieldset.classList.toggle('start-hidden', colorHidden);
   colorFieldset.hidden = colorHidden;
 
   // Timed games are unavailable in Bot Opponent mode. Remove the duration
   // control entirely rather than leaving a disabled selector taking up space.
-  const botModeSelected = selectedOpponent === 'bot';
   const difficultyFieldset = document.getElementById('difficultyFieldset');
   if (difficultyFieldset) {
     difficultyFieldset.classList.toggle('start-hidden', !botModeSelected);
@@ -3366,6 +3501,15 @@ window.addEventListener('keydown', (event) => {
   // steal focus from its Load and Cancel buttons. Spacebar activates a focused
   // dialog button instead of toggling Auto-Rotate.
   if (loadSequenceOverlay.classList.contains('visible')) {
+    // Version 1.31.0: pressing Enter in the Load Sequence textarea submits
+    // the sequence instead of inserting a newline. This mirrors activating
+    // the Load button while keeping the existing Tab/Space dialog behavior.
+    if (event.key === 'Enter' && document.activeElement === loadSequenceInput) {
+      loadSequenceButtonConfirm.click();
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === 'Tab') {
       moveLoadSequenceFocus(event.shiftKey ? -1 : 1);
       event.preventDefault();
@@ -3452,12 +3596,14 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.25.12: view/display keyboard controls moved away from A-H
-  // coordinate-entry letters. 3 toggles the 3-Axis display.
-  if (!isEditableTarget && event.key === '3') {
-    show3AxisToggle.checked = !show3AxisToggle.checked;
-    updateOrientationMarkerVisibility();
-    requestRender();
+  // Version 1.29.4: T toggles 3-Axis. The shortcut remains disabled in
+  // Classic mode because 8×8×1 is a two-dimensional board.
+  if (!isEditableTarget && event.key.toLowerCase() === 't') {
+    if (BOARD_DEPTH !== 1) {
+      show3AxisToggle.checked = !show3AxisToggle.checked;
+      updateOrientationMarkerVisibility();
+      requestRender();
+    }
     event.preventDefault();
     return;
   }
@@ -3686,6 +3832,9 @@ bluePulseToggle.addEventListener('change', () => {
 });
 
 show3AxisToggle.addEventListener('change', () => {
+  if (BOARD_DEPTH === 1) {
+    show3AxisToggle.checked = false;
+  }
   updateOrientationMarkerVisibility();
   requestRender();
 });
@@ -3708,6 +3857,7 @@ developerModeToggle.addEventListener('change', () => {
   updateBotDeveloperPanel();
 });
 bookOpeningsToggle.addEventListener('change', () => {
+  if (SIZE !== 8 || BOARD_DEPTH !== 1) return;
   bookOpeningsEnabled = bookOpeningsToggle.checked;
   updateBookOpeningLabel();
 });

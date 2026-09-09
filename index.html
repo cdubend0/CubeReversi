@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Cube Reversi — a Reversi game with selectable 4×4×4, 6×6×6, 8×8×8, and 8×8×1 Classic boards.">
-  <title>Cube Reversi — 1.28.23</title>
-  <link rel="stylesheet" href="CubeReversi.css?v=1.28.23">
+  <title>Cube Reversi — 1.29.3</title>
+  <link rel="stylesheet" href="CubeReversi.css?v=1.29.3">
   <link rel="icon" type="image/png" href="CubeReversiIcon.png">
 </head>
 <body>
@@ -98,16 +98,15 @@
       </select>
 
       <p id="gameDurationNote" class="start-note"></p>
-      <label class="start-option developer-mode-option" for="developerModeToggle">
-        <input id="developerModeToggle" type="checkbox">
-        <span>Developer Mode</span>
-        <small>Show Bot search statistics</small>
-      </label>
       <div id="startActionRow">
+        <label id="developerModeOption" class="start-option developer-mode-option" for="developerModeToggle">
+          <input id="developerModeToggle" type="checkbox">
+          <span>Show Bot Summary</span>
+        </label>
         <button id="startLoadSequenceButton" type="button">Load Sequence</button>
         <button id="startGameButton" type="button" autofocus>Start Game</button>
       </div>
-      <div class="start-menu-version" aria-label="Version 1.28.23">Version 1.28.23</div>
+      <div class="start-menu-version" aria-label="Version 1.31.12">Version 1.31.12</div>
     </div>
   </div>
       <div id="loadedSequenceChoiceOverlay" aria-hidden="true">
@@ -166,7 +165,7 @@
         <h1 id="brandTitle" role="button" tabindex="-1" aria-label="Start a new game">Cube Reversi</h1>
       </div>
       <div id="versionLabel" class="version">
-        <span class="version-number">Version 1.28.23</span><span class="version-separator"> · </span><span class="version-board-size">4×4×4</span>
+        <span class="version-number">Version 1.31.12</span><span class="version-separator"> · </span><span class="version-board-size">4×4×4</span>
       </div>
     </div>
     <div class="status-panel">
@@ -201,7 +200,7 @@
           <p><strong>V:</strong> Flip 180°</p>
           <p><strong>R:</strong> Reset View</p>
           <p><strong>Spacebar:</strong> Pause Rotation</p>
-          <p><strong>3:</strong> 3-Axis</p>
+          <p><strong>T:</strong> 3-Axis</p>
           <p><strong>L:</strong> Wireframe</p>
           <p><strong>J:</strong> Green Cubes</p>
           <p><strong>I:</strong> Blue Cubes</p>
@@ -252,11 +251,6 @@
     </section>
 
     <aside class="controls">
-  <section id="botDeveloperPanel" class="bot-developer-panel" hidden aria-labelledby="botDeveloperTitle">
-    <h2 id="botDeveloperTitle">Bot Search Summary</h2>
-    <textarea id="botDeveloperOutput" readonly spellcheck="false" aria-label="Bot search summary"></textarea>
-    <button id="copyBotDeveloperButton" type="button">Copy Bot Summary</button>
-  </section>
   <label class="toggle-control" for="bookOpeningsToggle">
     <input id="bookOpeningsToggle" type="checkbox" checked>
     <span>Book Openings</span>
@@ -297,6 +291,11 @@
     <button id="resignButton" type="button">Resign</button>
     <button id="resetButton" type="button">New Game</button>
   </div>
+  <section id="botDeveloperPanel" class="bot-developer-panel" hidden aria-labelledby="botDeveloperTitle">
+    <h2 id="botDeveloperTitle">Bot Summary</h2>
+    <textarea id="botDeveloperOutput" readonly spellcheck="false" aria-label="Bot search summary"></textarea>
+    <button id="copyBotDeveloperButton" type="button">Copy Bot Summary</button>
+  </section>
     </aside>
   </main>
   </div>
@@ -309,6 +308,6 @@
     }
   }
   </script>
-  <script type="module" src="CubeReversi.js?v=1.28.23"></script>
+  <script type="module" src="CubeReversi.js?v=1.31.12"></script>
 </body>
 </html>
