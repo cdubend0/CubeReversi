@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Cube Reversi — a Reversi game with selectable 4×4×4, 6×6×6, 8×8×8, and 8×8×1 Classic boards.">
+  <title>Cube Reversi</title>
+  <link rel="stylesheet" href="CubeReversi.css?v=1.32.23">
+  <link rel="icon" type="image/png" href="CubeReversiIcon.png">
+</head>
+<body>
+  <div id="startOverlay" aria-hidden="false">
+    <div id="startPanel" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+      <img class="start-logo" src="CubeReversiIcon.png" alt="Cube Reversi logo">
+      <h2 id="startTitle">Cube Reversi</h2>
+
+
+
+      <div class="start-mode-row">
+        <fieldset class="start-fieldset">
+          <legend>Opponent</legend>
+          <label class="start-option">
+            <input type="radio" name="opponentMode" value="human">
+            <span>Two Player</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="opponentMode" value="bot" checked>
+            <span>Bot Opponent</span>
+          </label>
+        </fieldset>
+
+        <fieldset id="colorFieldset" class="start-fieldset">
+          <legend>Your Color</legend>
+          <label class="start-option">
+            <input type="radio" name="playerColor" value="random" checked>
+            <span>Random</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="playerColor" value="black">
+            <span>Black</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="playerColor" value="white">
+            <span>White</span>
+          </label>
+        </fieldset>
+
+
+      </div>
+
+      <div class="start-board-settings-row">
+        <fieldset id="boardSizeFieldset" class="start-fieldset">
+        <legend>Board Size</legend>
+        <div class="board-size-list">
+          <label class="start-option">
+            <input type="radio" name="boardSize" value="4" checked>
+            <span>4×4×4</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="boardSize" value="6">
+            <span>6×6×6</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="boardSize" value="8">
+            <span>8×8×8</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="boardSize" value="8x8x1">
+            <span>8×8×1 (Classic)</span>
+          </label>
+        </div>
+        </fieldset>
+        <fieldset id="difficultyFieldset" class="start-fieldset">
+          <legend>Bot Difficulty</legend>
+          <label class="start-option">
+            <input type="radio" name="botDifficulty" value="easy">
+            <span>Easy</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="botDifficulty" value="medium" checked>
+            <span>Medium</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="botDifficulty" value="hard">
+            <span>Hard</span>
+          </label>
+        </fieldset>
+      </div>
+
+      <label id="gameDurationLabel" class="start-select-label" for="gameDuration">Game Duration</label>
+      <select id="gameDuration">
+        <option value="1">1 minute</option>
+        <option value="2">2 minutes</option>
+        <option value="5" selected>5 minutes</option>
+        <option value="10">10 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="unlimited">Unlimited</option>
+      </select>
+
+      <p id="gameDurationNote" class="start-note"></p>
+      <div id="startActionRow">
+        <label id="developerModeOption" class="start-option developer-mode-option" for="developerModeToggle">
+          <input id="developerModeToggle" type="checkbox">
+          <span>Bot Summary</span>
+        </label>
+        <button id="startLoadSequenceButton" type="button">Load Sequence</button>
+        <button id="startGameButton" type="button" autofocus>Start Game</button>
+      </div>
+      <a class="start-menu-feedback" href="mailto:feedback@cubereversi.com?subject=CubeReversi">Feedback</a>
+      <div class="start-menu-version" aria-label="Version 1.32.23">Version 1.32.23</div>
+    </div>
+  </div>
+      <div id="loadedSequenceChoiceOverlay" aria-hidden="true">
+    <div id="loadedSequenceChoicePanel" role="dialog" aria-modal="true" aria-labelledby="loadedSequenceChoiceTitle">
+      <h2 id="loadedSequenceChoiceTitle">Choose How to Play</h2>
+      <p id="loadedSequenceChoiceMessage">The sequence has been loaded. Choose which color you want to play.</p>
+      <fieldset class="loaded-sequence-choice-fieldset">
+        <label class="start-option">
+          <input type="radio" name="loadedPlayerMode" value="black">
+          <span>Black (vs Bot)</span>
+        </label>
+        <label class="start-option">
+          <input type="radio" name="loadedPlayerMode" value="white">
+          <span>White (vs Bot)</span>
+        </label>
+        <label class="start-option">
+          <input type="radio" name="loadedPlayerMode" value="both" checked>
+          <span>Play as Both</span>
+        </label>
+      </fieldset>
+      <fieldset id="loadedBotDifficultyFieldset" class="loaded-sequence-choice-fieldset start-hidden" hidden>
+        <legend>Bot Difficulty</legend>
+        <label class="start-option">
+          <input type="radio" name="loadedBotDifficulty" value="easy">
+          <span>Easy</span>
+        </label>
+        <label class="start-option">
+          <input type="radio" name="loadedBotDifficulty" value="medium">
+          <span>Medium</span>
+        </label>
+        <label class="start-option">
+          <input type="radio" name="loadedBotDifficulty" value="hard">
+          <span>Hard</span>
+        </label>
+      </fieldset>
+      <div id="loadedSequenceChoiceActions">
+        <button id="loadedSequenceChoiceContinue" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+  <div id="gameEndConfirmOverlay" aria-hidden="true">
+        <div id="gameEndConfirmPanel" role="dialog" aria-modal="true" aria-labelledby="gameEndConfirmTitle">
+          <h2 id="gameEndConfirmTitle">Are you sure?</h2>
+          <p id="gameEndConfirmMessage">This will end the current game.</p>
+          <div id="gameEndConfirmActions">
+            <button id="cancelGameEndButton" type="button">Cancel</button>
+            <button id="confirmGameEndButton" type="button">Continue</button>
+          </div>
+        </div>
+      </div>
+  <div id="appShell">
+  <header class="topbar">
+    <div class="brand-group">
+      <img id="brandLogo" class="brand-logo" src="CubeReversiIcon.png" alt="Cube Reversi logo">
+      <div class="brand-text">
+        <h1 id="brandTitle" role="button" tabindex="-1" aria-label="Start a new game">Cube Reversi</h1>
+      </div>
+      <div id="versionLabel" class="version">
+        <span class="version-number">Version 1.32.23</span><span class="version-separator"> · </span><span class="version-board-size">4×4×4</span>
+      </div>
+    </div>
+    <div class="status-panel">
+      <div id="turnLabel" class="turn-status"><span id="playingAsLabel" class="playing-as">Playing As: Black</span><span id="turnText">Black's turn</span><span id="turnMoveCount" class="turn-move-count">Legal moves: 0</span></div>
+      <span id="scoreLabel" class="score-summary">Black 4 · White 4</span>
+      <span id="emptySpacesLabel">Spaces Remaining: 56</span>
+      <span id="botDifficultyLabel" class="bot-difficulty-label" aria-live="polite"></span>
+      <div id="clockPanel" class="clock-panel" aria-label="Game scores and clocks">
+        <span id="blackClockLabel" class="clock-label">4 Black 5:00</span>
+        <span id="whiteClockLabel" class="clock-label">4 White 5:00</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="game">
+      <div id="scene" aria-label="Three-dimensional Cube Reversi board"></div>
+      <div id="bookOpeningLabel" class="book-opening-label" aria-live="polite" hidden></div>
+      <div id="coordinateAxes" aria-label="Cube coordinate axes"></div>
+      <div id="coordinateReadout" aria-live="polite"></div>
+      <button id="passOverlay" type="button" aria-label="Dismiss pass message">
+        <span id="passMessage"></span>
+      </button>
+      <div id="helpOverlay" aria-hidden="true">
+        <div id="helpPanel" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+          <h2 id="helpTitle">Keyboard Controls</h2>
+          <p><strong>- / +:</strong> Zoom</p>
+          <p><strong>↑ / ↓:</strong> Tilt</p>
+          <p><strong>← / →:</strong> Rotate</p>
+          <p><strong>. / /:</strong> Roll</p>
+          <p><strong>V:</strong> Flip 180°</p>
+          <p><strong>R:</strong> Reset View</p>
+          <p id="classicOpeningsHelp"><strong>O:</strong> Show Openings</p>
+          <p><strong>Spacebar:</strong> Pause Rotation</p>
+          <p id="threeAxisHelp"><strong>T:</strong> 3-Axis</p>
+          <p><strong>L:</strong> Wireframe</p>
+          <p><strong>J:</strong> Green Cubes</p>
+          <p><strong>I:</strong> Blue Cubes</p>
+          <p><strong>P:</strong> Pulse</p>
+          <p><strong>M:</strong> Undo</p>
+          <p><strong>K:</strong> Redo</p>
+          <p><strong>N:</strong> New Game</p>
+        </div>
+      </div>
+      <div id="sequenceOverlay" aria-hidden="true">
+        <div id="sequencePanel" role="dialog" aria-modal="true" aria-labelledby="sequenceTitle">
+          <h2 id="sequenceTitle">Move Sequence</h2>
+          <textarea id="moveSequence" readonly spellcheck="false" aria-label="Move sequence"></textarea>
+          <div id="sequenceActions">
+            <button id="copySequenceButton" type="button">Copy</button>
+            <button id="closeSequenceButton" type="button">Close</button>
+          </div>
+        </div>
+      </div>
+      <div id="resignConfirmOverlay" aria-hidden="true">
+        <div id="resignConfirmPanel" role="dialog" aria-modal="true" aria-labelledby="resignConfirmTitle">
+          <h2 id="resignConfirmTitle">Are you sure you want to resign?</h2>
+          <div id="resignConfirmActions">
+            <button id="cancelResignButton" type="button">Cancel</button>
+            <button id="confirmResignButton" type="button">Resign</button>
+          </div>
+        </div>
+      </div>
+      <div id="loadSequenceOverlay" aria-hidden="true">
+        <div id="loadSequencePanel" role="dialog" aria-modal="true" aria-labelledby="loadSequenceTitle">
+          <h2 id="loadSequenceTitle">Load Move Sequence</h2>
+          <p>Paste a Cube Reversi move sequence below. Use coordinates separated by commas; use PASS when a player passes.</p>
+          <textarea id="loadSequenceInput" spellcheck="false" aria-label="Move sequence to load" placeholder="D-2-S, D-4-T, B-4-S"></textarea>
+          <div id="loadSequenceError" role="alert" aria-live="polite"></div>
+          <div id="sequenceActions">
+            <button id="loadSequenceButtonConfirm" type="button">Load</button>
+            <button id="cancelLoadSequenceButton" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <form id="moveEntry" aria-label="Enter a move coordinate">
+        <label for="moveCoordinate">Move:</label>
+        <input id="moveCoordinate" name="moveCoordinate" type="text"
+               inputmode="text" autocomplete="off" spellcheck="false"
+               maxlength="9" placeholder="A - 2 - S" aria-label="Move coordinate">
+        <button id="moveButton" type="submit">Play</button>
+      </form>
+    </section>
+
+    <div class="controls-shell">
+    <aside class="controls">
+  <label class="toggle-control" for="bookOpeningsToggle">
+    <input id="bookOpeningsToggle" type="checkbox" checked>
+    <span>Name Openings</span>
+  </label>
+      <label class="toggle-control" for="autoRotateToggle">
+    <input id="autoRotateToggle" type="checkbox">
+    <span>Auto-Rotate</span>
+  </label>
+  <label class="toggle-control" for="show3AxisToggle">
+    <input id="show3AxisToggle" type="checkbox">
+    <span>3-Axis</span>
+  </label>
+  <label class="toggle-control" for="showWireframeToggle">
+    <input id="showWireframeToggle" type="checkbox" checked>
+    <span>Wireframe</span>
+  </label>
+  <label class="toggle-control" for="hideGreenCubesToggle">
+    <input id="hideGreenCubesToggle" type="checkbox">
+    <span>Green Cubes</span>
+  </label>
+  <label class="toggle-control" for="blueCubesToggle">
+    <input id="blueCubesToggle" type="checkbox">
+    <span>Blue Cubes</span>
+  </label>
+  <label class="toggle-control" for="bluePulseToggle">
+    <input id="bluePulseToggle" type="checkbox">
+    <span>Pulse</span>
+  </label>
+  <div class="history-actions">
+    <button id="undoButton" type="button" disabled>Undo Move</button>
+    <button id="redoButton" type="button" disabled>Redo Move</button>
+  </div>
+  <div class="sequence-actions">
+    <button id="moveSequenceButton" type="button">Move Sequence</button>
+    <button id="loadSequenceButton" type="button">Load Sequence</button>
+  </div>
+  <div class="final-actions">
+    <button id="resignButton" type="button">Resign</button>
+    <button id="resetButton" type="button">New Game</button>
+  </div>
+  <section id="botDeveloperPanel" class="bot-developer-panel" hidden aria-labelledby="botDeveloperTitle">
+    <h2 id="botDeveloperTitle">Bot Summary</h2>
+    <textarea id="botDeveloperOutput" readonly spellcheck="false" aria-label="Bot search summary"></textarea>
+    <button id="copyBotDeveloperButton" type="button">Copy Bot Summary</button>
+  </section>
+    </aside>
+    </div>
+  </main>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.185.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.185.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="CubeReversi.js?v=1.32.23"></script>
+</body>
+</html>
