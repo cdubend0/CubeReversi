@@ -1,5 +1,5 @@
 /*
- * Cube Reversi 1.31.12 — Bot Engine
+ * Cube Reversi — Bot Engine
  *
  * The Bot Engine remains a move-selection layer only. CubeReversi.js remains
  * authoritative for game state, rules, legal moves, rendering, turn management,
@@ -218,7 +218,7 @@ function moveKey(move) {
 }
 
 // -----------------------------------------------------------------------------
-// Classic Opening Book — Version 1.31.9
+// Classic Opening Book — the pattern-based
 // -----------------------------------------------------------------------------
 // The opening book supplements the normal search engine; it never replaces it.
 // It is intentionally limited to the 8×8×1 Classic board. Positions are
@@ -235,7 +235,7 @@ function moveKey(move) {
 // Additional named variations are documented in public Othello opening catalogs.
 // The book contains overlapping prefixes and multiple prepared continuations.
 const CLASSIC_OPENING_BOOK_LINES = [
-  // Core established lines retained from the original Cube Reversi book.
+  // Core established opening lines.
   { name: 'Rose', priority: 100, moves: 'F5 D6 C5 F4 E3 C6 D3 F6 E6 D7' },
   { name: 'Tiger', priority: 90, moves: 'F5 D6 C3 D3 C4' },
   { name: 'Buffalo', priority: 80, moves: 'F5 F6 E6 D6 C3' },
@@ -243,7 +243,7 @@ const CLASSIC_OPENING_BOOK_LINES = [
   { name: 'Horse', priority: 60, moves: 'F5 D6 C5 F4 D3' },
   { name: 'Shaman', priority: 50, moves: 'F5 D6 C5 F4 E3 C6 F3' },
 
-  // Expanded established continuations / variations.  These are sourced from
+  // Expanded established continuations / variations. These are sourced from
   // public Othello opening catalogs and the weltyc/othello openings list.
   { name: 'Mainline Tiger', priority: 95, moves: 'F5 D6 C3 D3 C4 F4 C5 B4 B5 C6 F3 E6 E3 G6 F6 G5 D7 G3' },
   { name: 'Rose-Bill', priority: 89, moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E3' },
@@ -570,7 +570,7 @@ function classicEdgeBalance(board, player) {
   return own - otherCount;
 }
 
-// Version 1.31.0: classic edge-structure evaluation. Public Othello-engine
+// classic edge-structure evaluation. Public Othello-engine
 // research consistently emphasizes edge patterns rather than treating edge
 // squares as isolated positional values. This feature is deliberately
 // conservative: it rewards corner-anchored edge runs and penalizes exposed,
@@ -636,7 +636,7 @@ function classicEdgeStructureScore(board, player) {
 }
 
 
-// Version 1.31.9: Classic pattern-based evaluation.  This is the first
+// Classic pattern-based evaluation.  This is the first
 // dedicated pattern layer in the Bot.  It is intentionally conservative and
 // hand-weighted rather than pretending to be a trained neural model.  The
 // pattern families are inspired by public Othello engines that evaluate
@@ -738,7 +738,7 @@ function classicDiagonalPatternScore(board, player) {
   return score;
 }
 
-// Version 1.31.9: add 5x2 corner/edge patterns. Othello Sensei explicitly
+// add 5x2 corner/edge patterns. Othello Sensei explicitly
 // uses 5x2 corner patterns alongside 3x3 corners and diagonals. This layer
 // gives the evaluator a longer view of the edge/corner relationship, which is
 // especially useful when an apparently harmless edge move leaves the corner
@@ -793,7 +793,7 @@ function classicCorner5x2PatternScore(board, player) {
   return score;
 }
 
-// Version 1.31.9: edge-pattern cohesion. Public Othello engines use edge
+// edge-pattern cohesion. Public Othello engines use edge
 // configurations as patterns rather than treating every edge square in
 // isolation. This feature is deliberately narrower than classicEdgeStructureScore:
 // it measures how much of an edge is already safely connected to a friendly
@@ -872,7 +872,7 @@ function classicEdgePatternScore(board, player) {
   return score;
 }
 
-// Version 1.31.9: frontier-cluster structure. Frontier count already measures
+// frontier-cluster structure. Frontier count already measures
 // how many discs touch empty squares, but it treats every frontier disc as
 // equally exposed. Stronger Othello evaluations also consider enclosure and
 // local relationships. This feature adds a small structural penalty when a
@@ -925,7 +925,7 @@ function classicFrontierClusterScore(board, player) {
   return otherClusterLinks - ownClusterLinks;
 }
 
-// Version 1.31.9: empty-region parity. Othello strategy references treat
+// empty-region parity. Othello strategy references treat
 // parity as more than simply counting all remaining empty squares: when empty
 // squares split into separate regions, the side that moves first in an odd
 // region tends to make the last move there, while an even region tends to
@@ -980,7 +980,7 @@ function classicPatternScore(board, player) {
     classicCorner5x2PatternScore(board, player);
 }
 
-// Version 1.31.9: dynamic empty-corner risk. Public Othello heuristics
+// dynamic empty-corner risk. Public Othello heuristics
 // commonly treat X/C squares as dangerous while the corresponding corner is
 // empty. This feature makes that relationship explicit instead of leaving it
 // entirely to the general pattern terms. It is intentionally a soft signal:
@@ -1029,7 +1029,7 @@ function classicCornerRiskScore(board, player, directions) {
 
 
 
-// Version 1.31.12: edge-intrusion tempo. A recurring failure case showed the
+// edge-intrusion tempo. A recurring failure case showed the
 // Bot taking an edge square and then allowing the opponent to immediately play
 // into the gap between two of the Bot's edge discs (for example A5/A7 -> A6).
 // This is a concrete edge-tempo attack: the opponent does not need immediate
@@ -1077,7 +1077,7 @@ function classicEdgeIntrusionScore(board, player, size, depth, directions) {
   return intrusionCount(player, other) - intrusionCount(other, player);
 }
 
-// Version 1.31.10: edge-attack and corner-access stability. Othello edge play
+// edge-attack and corner-access stability. Othello edge play
 // is governed not just by who currently has corner access, but by which side
 // controls the next edge tempo and whether an apparently safe edge can be
 // attacked on the following move. This feature supplements the wedge detector
@@ -1165,7 +1165,7 @@ function classicEdgeAttackScore(board, player, size, depth, directions) {
   return edgeAttack(player) - edgeAttack(other);
 }
 
-// Version 1.31.9: wedge-to-corner threat detection. A wedge is an edge move
+// wedge-to-corner threat detection. A wedge is an edge move
 // played between two opponent discs. On an empty-corner edge, that wedge can
 // create a corner attack that ordinary C-square/X-square scoring does not see
 // directly. This feature looks for legal edge wedges and, more importantly,
@@ -1577,7 +1577,7 @@ function searchRoot(board, player, moves, size, depth, directions, maxDepth, dea
     if (state.collectRootDiagnostics || bestScore === -INF) {
       score = -searchNode(state, next, opponent(player), maxDepth - 1, -INF, INF, true, nextHash);
     } else {
-      // Version 1.30.9: root Principal Variation Search. Later root moves are
+      // root Principal Variation Search. Later root moves are
       // first searched with a null window and are fully re-searched only when
       // they prove capable of beating the current root best. This changes
       // search efficiency, not the evaluator or move-selection policy.
@@ -1657,7 +1657,7 @@ export function chooseMove(moveOptions, context = null) {
   const counts = countDiscs(board, size, depth);
   const profile = DIFFICULTY_PROFILES[context.difficulty] || DIFFICULTY_PROFILES.medium;
 
-  // Version 1.28.23: established Classic openings are consulted before search.
+  // established Classic openings are consulted before search.
   // The authoritative controller still supplies the legal move list, and the
   // book is never used for 3D boards.
   if (depth === 1 && size === 8 && context.difficulty !== 'easy') {
@@ -1682,7 +1682,7 @@ export function chooseMove(moveOptions, context = null) {
   const timeLimit = depth === 1 ? profile.classicTimeMs : profile.threeDTimeMs;
   const deadline = performance.now() + timeLimit;
 
-  // Version 1.31.12: Hard Classic uses a 3-second budget so the search can exploit the improved move ordering.
+  // Hard Classic uses a 3-second budget so the search can exploit the improved move ordering.
   // Near a finished game, favor complete search. Iterative deepening will still
   // stop at the time limit, so the browser remains responsive.
   const targetDepth = profile.randomness > 0

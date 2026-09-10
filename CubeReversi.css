@@ -1,6 +1,6 @@
-/* Cube Reversi 1.31.12 */
+/* Cube Reversi 1.32.1 */
 
-/* Version 1.21.0 — loaded-sequence score visibility and game-start splash/settings screen */
+/* loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
   position: fixed;
   inset: 0;
@@ -139,9 +139,24 @@
   opacity: .55;
 }
 
+.start-menu-feedback {
+  position: absolute;
+  top: .65rem;
+  right: 1rem;
+  margin: 0;
+  font-size: .8rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.start-menu-feedback:hover,
+.start-menu-feedback:focus-visible {
+  text-decoration: underline;
+}
+
 .start-menu-version {
   position: absolute;
-  top: .75rem;
+  top: 2rem;
   right: 1rem;
   margin: 0;
   font-size: .75rem;
@@ -149,7 +164,7 @@
   text-align: right;
 }
 
-/* Version 1.29.3 — keep the Bot Summary toggle on the same row as the
+/* keep the Bot Summary toggle on the same row as the
    start-menu action buttons to reduce the overall height of the menu. */
 #startActionRow {
   display: flex;
@@ -175,7 +190,7 @@
 
 
 
-/* Version 1.22.35 — place Resign and New Game side by side to reduce the
+/* place Resign and New Game side by side to reduce the
    vertical height of the control panel after adding additional toggles. */
 .final-actions {
   display: flex;
@@ -221,7 +236,7 @@ body {
   overscroll-behavior-y: none;
 }
 
-/* Version 1.22.26 — keep the header and main game area inside a dedicated
+/* keep the header and main game area inside a dedicated
    app shell. On desktop the shell fills the viewport, with the header taking
    its natural height and the game/controls taking all remaining space.
    Mobile remains naturally scrollable so the lower controls stay below the
@@ -290,7 +305,7 @@ body {
   border-bottom: 1px solid rgba(255,255,255,.12);
 }
 
-/* Version 1.18.3 — prevent accidental text selection during touch play. */
+/* prevent accidental text selection during touch play. */
 .topbar,
 .topbar * {
   -webkit-user-select: none;
@@ -298,7 +313,7 @@ body {
   -webkit-touch-callout: none;
 }
 
-/* Version 1.20.7 — prevent accidental text selection in the lower controls
+/* prevent accidental text selection in the lower controls
    sidebar during touch/cube manipulation on mobile devices. */
 .controls,
 .controls * {
@@ -342,9 +357,9 @@ h1 {
 }
 
 
-/* Version 1.12.5 — hide game clocks in Unlimited mode */
-/* Version 1.18.3 — combine each player's score and clock in one row. */
-/* Version 1.21.0 — keep scores in the player rows when clocks are hidden. */
+/* hide game clocks in Unlimited mode */
+/* combine each player's score and clock in one row. */
+/* keep scores in the player rows when clocks are hidden. */
 .score-summary {
   display: none;
 }
@@ -429,7 +444,7 @@ button:hover {
 }
 
 
-/* Version 1.29.3 — the Bot Summary toggle is now part of the start-menu
+/* the Bot Summary toggle is now part of the start-menu
    action row. The previous descriptive text has been removed to reduce the
    menu height. */
 .developer-mode-option {
@@ -443,7 +458,7 @@ button:hover {
 }
 
 .bot-developer-panel {
-  /* Version 1.29.3: add breathing room below the action buttons. */
+  /* add breathing room below the action buttons. */
   margin: 1rem 0 1rem;
   padding: .8rem;
   border: 1px solid rgba(255,255,255,.14);
@@ -477,7 +492,7 @@ button:hover {
   margin-top: .65rem;
 }
 
-/* Version 1.8.5 — Undo Move is unavailable until at least one move exists. */
+/* Undo Move is unavailable until at least one move exists. */
 button:disabled {
   opacity: .45;
   cursor: default;
@@ -487,7 +502,7 @@ button:disabled:hover {
   background: rgba(255,255,255,.08);
 }
 
-/* Version 1.22.26 — place Undo and Redo side by side to reduce the
+/* place Undo and Redo side by side to reduce the
    vertical height of the desktop and mobile control panels. */
 .history-actions {
   display: flex;
@@ -501,7 +516,7 @@ button:disabled:hover {
   margin-top: 0;
 }
 
-/* Version 1.22.29 — place Move Sequence and Load Sequence side by side to
+/* place Move Sequence and Load Sequence side by side to
    reduce the vertical height of the control panel. */
 .sequence-actions {
   display: flex;
@@ -530,7 +545,7 @@ button:disabled:hover {
     padding-top: 2rem;
   }
 
-  /* Version 1.22.21 — the mobile controls handle protrudes above the
+  /* the mobile controls handle protrudes above the
      controls section so it remains visible and easy to grab even when Safari
      places its URL bar over the bottom of the viewport. It accepts vertical
      touch gestures so it can be used as a natural starting point for scrolling. */
@@ -565,7 +580,7 @@ button:disabled:hover {
   }
 }
 
-/* Version 1.5.1 — centered, larger turn indicator */
+/* centered, larger turn indicator */
 .turn-status {
   position: absolute;
   left: 50%;
@@ -595,7 +610,7 @@ button:disabled:hover {
   white-space: nowrap;
 }
 
-/* Version 1.5.1 — lower-left coordinate-axis model */
+/* lower-left coordinate-axis model */
 #coordinateAxes {
   position: absolute;
   left: -30px;
@@ -612,7 +627,7 @@ button:disabled:hover {
   height: 100%;
 }
 
-/* Version 1.5.1 — coordinate readout */
+/* coordinate readout */
 #coordinateReadout {
   position: absolute;
   left: 14px;
@@ -628,7 +643,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.5.1 — coordinate move entry */
+/* coordinate move entry */
 #moveEntry {
   position: absolute;
   right: 14px;
@@ -677,7 +692,7 @@ button:disabled:hover {
     display: none;
   }
 
-  /* Version 1.18.3 — responsive header structure. */
+  /* responsive header structure. */
   .brand-group {
     grid-template-columns: 48px auto;
     grid-template-rows: auto auto auto;
@@ -709,7 +724,7 @@ button:disabled:hover {
     margin-top: 0;
   }
 
-  /* Version 1.22.6 — add vertical header space on mobile so the centered
+  /* add vertical header space on mobile so the centered
      Playing As / turn block has room to sit lower without crowding the header. */
   .topbar {
     align-items: flex-start;
@@ -734,7 +749,7 @@ button:disabled:hover {
   }
 }
 
-/* Version 1.28.16 — narrow Chromebook/desktop-pointer repair. A small
+/* narrow Chromebook/desktop-pointer repair. A small
    browser viewport should not hide the synchronized coordinate model merely
    because it is below the phone breakpoint. Phones/tablets keep the compact
    mobile layout; pointer-capable narrow displays retain the guide. */
@@ -745,13 +760,13 @@ button:disabled:hover {
   }
 }
 
-/* Version 1.5.1 — guided coordinate entry */
+/* guided coordinate entry */
 #moveCoordinate {
   text-transform: uppercase;
 }
 
 
-/* Version 1.6.7 — Auto-Rotate sidebar toggle */
+/* Auto-Rotate sidebar toggle */
 .toggle-control {
   display: flex;
   align-items: center;
@@ -769,7 +784,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.7.3 — pass/game-complete overlay */
+/* pass/game-complete overlay */
 #passOverlay {
   position: absolute;
   inset: 0;
@@ -808,10 +823,10 @@ button:disabled:hover {
   background: rgba(35,43,48,.96);
 }
 
-/* Version 1.7.7 — Show 3-Axis sidebar toggle uses the existing toggle styling. */
+/* Show 3-Axis sidebar toggle uses the existing toggle styling. */
 
 
-/* Version 1.8.8 — Keyboard help legend */
+/* Keyboard help legend */
 #helpOverlay {
   position: absolute;
   inset: 0;
@@ -846,7 +861,7 @@ button:disabled:hover {
   margin: .45rem 0;
 }
 
-/* Version 1.8.2 — Move Sequence viewer */
+/* Move Sequence viewer */
 #sequenceOverlay {
   position: absolute;
   inset: 0;
@@ -903,7 +918,7 @@ button:disabled:hover {
   margin-top: .75rem;
 }
 
-/* Version 1.8.8 — Move Sequence loader */
+/* Move Sequence loader */
 #loadSequenceOverlay {
   position: absolute;
   inset: 0;
@@ -958,7 +973,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.11.1 — custom resignation confirmation */
+/* custom resignation confirmation */
 #resignConfirmOverlay {
   position: absolute;
   inset: 0;
@@ -1004,7 +1019,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.20.7 — choose play mode after loading a sequence */
+/* choose play mode after loading a sequence */
 #loadedSequenceChoiceOverlay {
   position: fixed;
   inset: 0;
@@ -1066,7 +1081,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.20.7 — generic confirmation for actions that end an active game */
+/* generic confirmation for actions that end an active game */
 #gameEndConfirmOverlay {
   position: fixed;
   inset: 0;
@@ -1119,7 +1134,7 @@ button:disabled:hover {
 }
 
 
-/* Version 1.28.23 — persistent Classic opening recognition label. */
+/* persistent Classic opening recognition label. */
 .book-opening-label {
   position: absolute;
   top: .85rem;

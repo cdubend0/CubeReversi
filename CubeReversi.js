@@ -3,7 +3,7 @@ import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import { chooseMove } from './CubeReversiBot.js';
 
 /*
- * Cube Reversi 1.31.12
+ * Cube Reversi Game Controller
  *
  * Multi-size board release:
  * - 4×4×4, 6×6×6, 8×8×8, or 8×8×1 Classic board
@@ -45,12 +45,12 @@ function isMobileViewport() {
 function setInitialCameraPosition() {
   const scale = isMobileViewport() ? MOBILE_CAMERA_SCALE : 1;
 
-  // Version 1.25.4: Classic 8×8×1 remains orthogonal and starts about 33%
-  // farther from the board than 1.25.3. resetView() uses this same function,
-  // so R returns Classic mode to this exact zoom and orientation.
+  // Classic 8×8×1 uses a straight-on orthogonal starting view.
+  // resetView() uses this same function, so R returns Classic mode to this
+  // exact zoom and orientation.
   if (BOARD_DEPTH === 1) {
     const distance = 17.024 * scale;
-    // Version 1.27.12: Classic remains logically 2D, but the visual camera
+    // Classic remains logically 2D, but the visual camera
     // is given a small fixed elevation so the six-face occupied cube shells
     // have visible depth instead of appearing as flat front-facing planes.
     // This is a Classic-only visual change; the logical board and coordinates
@@ -152,7 +152,7 @@ renderer.setSize(sceneElement.clientWidth, sceneElement.clientHeight);
 sceneElement.appendChild(renderer.domElement);
 
 const controls = new ArcballControls(camera, renderer.domElement, scene);
-// Version 1.10.3: keep ArcballControls rotation but hide its on-screen
+// keep ArcballControls rotation but hide its on-screen
 // trackball gizmos. Pan/focus/grid remain off; zoom remains enabled.
 controls.enableRotate = true;
 controls.enablePan = false;
@@ -183,7 +183,7 @@ scene.add(keyLight);
 const cubeGroup = new THREE.Group();
 scene.add(cubeGroup);
 
-// Version 1.22.29: the optional wireframe now shows only the twelve outer
+// the optional wireframe now shows only the twelve outer
 // edges of the board bounding box, rather than the full internal cell grid. It is
 // visual-only and is not a raycasting target.
 const wireframeGroup = new THREE.Group();
@@ -219,11 +219,11 @@ function updateWireframeVisibility() {
 }
 
 rebuildWireframe();
-// Version 1.25.1: apply the initial Wireframe checkbox state here without
+// apply the initial Wireframe checkbox state here without
 // requesting a render before the render-on-demand state is initialized.
 wireframeGroup.visible = showWireframeToggle.checked;
 
-// Version 1.7.7: the original glossy dark green orientation sphere is the
+// the original glossy dark green orientation sphere is the
 // default orientation marker at the A-1-W corner. The optional 3-Axis
 // view below provides the three colored edge alternative.
 const orientationMarkerGeometry = new THREE.SphereGeometry(0.14, 24, 16);
@@ -255,13 +255,13 @@ function updateOrientationMarkerVisibility() {
   update3AxisVisibility();
 }
 
-// Version 1.29.0: 8×8×1 Classic is a two-dimensional Reversi board, so the
-// 3-Axis control is not offered for Classic and the 3-key shortcut is disabled.
+// 8×8×1 Classic is a two-dimensional Reversi board, so the
+// Axis control is not offered for Classic and the 3-key shortcut is disabled.
 function update3AxisControlAvailability() {
   const threeAxisControl = show3AxisToggle.closest('label');
   const isClassic = BOARD_DEPTH === 1;
   if (threeAxisControl) {
-    // Version 1.29.4: Classic must not display the 3-Axis control at all.
+    // Classic must not display the 3-Axis control at all.
     // Use both the semantic hidden state and an explicit inline display reset
     // so the control cannot be restored by sidebar toggle styling.
     threeAxisControl.hidden = isClassic;
@@ -312,7 +312,7 @@ cubeGroup.add(orientationEdges);
 update3AxisControlAvailability();
 updateBookOpeningControlAvailability();
 // ---------------------------------------------------------------------------
-// Coordinate-axis model — Version 1.6.1
+// Coordinate-axis model
 // ---------------------------------------------------------------------------
 // Board notation (size-dependent):
 //   X axis: A B C D E F G H
@@ -326,7 +326,7 @@ const coordinateReadout = document.getElementById('coordinateReadout');
 
 const axesScene = new THREE.Scene();
 
-// Version 1.6.4: light the miniature model with the same scene-lighting setup
+// light the miniature model with the same scene-lighting setup
 // needed by the shared MeshStandardMaterial used by both orientation markers.
 const axesHemisphereLight = new THREE.HemisphereLight(0xddeeff, 0x20252a, 2.0);
 axesScene.add(axesHemisphereLight);
@@ -351,7 +351,7 @@ coordinateAxesHost.appendChild(axesRenderer.domElement);
 const axesGroup = new THREE.Group();
 axesScene.add(axesGroup);
 
-// Version 1.21.2: performance foundation — render on demand. The scene is no
+// performance foundation — render on demand. The scene is no
 // longer rendered continuously when nothing is changing. Continuous rendering
 // is reserved for active visual animations such as Auto-Rotate and F flip.
 let continuousRenderActive = false;
@@ -396,8 +396,8 @@ controls.addEventListener('change', requestRender);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // Version 1.22.17: treat a hidden browser tab like the blue animation's
-    // inactivity timeout. Stop the pulse immediately and require fresh user
+    // treat a hidden browser tab like the blue animation's
+    // inactivity timeout. Stop the pulse immediately and require fresh player
     // interaction with the game to start it again.
     if (blueOpacityStopTimer !== null) {
       window.clearTimeout(blueOpacityStopTimer);
@@ -418,30 +418,29 @@ document.addEventListener('visibilitychange', () => {
 
   requestRender();
   // Auto-Rotate and flip animation retain their existing visibility behavior.
-  // The blue legal-move pulse remains stopped until the user interacts.
+  // The blue legal-move pulse remains stopped until the player interacts.
   if (flipAnimationActive || (autoRotateEnabled && !hoveringOverCube)) {
     startContinuousRendering();
   }
 });
 
-// Version 1.6.4: retain the visual center of the coordinate model as its
+// retain the visual center of the coordinate model as its
 // rotation pivot while preserving the model's existing screen position.
 const axesModelCenter = 0.71;
 const axesContent = new THREE.Group();
 axesContent.position.set(-axesModelCenter, -axesModelCenter, -axesModelCenter);
 axesGroup.add(axesContent);
 
-// Version 1.6.4: matching glossy dark green orientation marker at the miniature model's
+// matching glossy dark green orientation marker at the miniature model's
 // origin, corresponding to the A-1-W corner of the main board.
 const miniOrientationMarkerGeometry = new THREE.SphereGeometry(0.09, 24, 16);
 const miniOrientationMarker = new THREE.Mesh(
   miniOrientationMarkerGeometry,
   orientationMarkerMaterial
 );
-// Version 1.25.7: the synchronized Classic guide retains its matching
-// coordinate orientation. Version 1.25.8 moves only the main-board
-// orientation marker to the bottom-left so it matches this guide's
-// synchronized motion while leaving the A–H / 1–8 labels unchanged.
+// The synchronized Classic guide retains its matching coordinate orientation.
+// The main-board orientation marker matches the guide while leaving the
+// A–H / 1–8 labels unchanged.
 miniOrientationMarker.position.set(0, BOARD_DEPTH === 1 ? 1.44 : 0, 0);
 axesContent.add(miniOrientationMarker);
 axesGroup.position.set(axesModelCenter, axesModelCenter, axesModelCenter);
@@ -472,9 +471,9 @@ addCoordinateAxis('y', new THREE.Vector3(0, 1, 0), axisColors.y);
 addCoordinateAxis('z', new THREE.Vector3(0, 0, 1), axisColors.z);
 
 function updateCoordinateAxisVisibility() {
-  // Version 1.25.5: Classic 8×8×1 is two-dimensional, so its synchronized
+  // Classic 8×8×1 is two-dimensional, so its synchronized
   // corner model shows only A–H and 1–8. The third/Z axis is omitted.
-  // Version 1.27.12: Classic is visually given cube depth, but its synchronized
+  // Classic is visually given cube depth, but its synchronized
   // coordinate model remains strictly two-dimensional. Do not display the Z
   // axis or any Z coordinate in the Classic guide.
   coordinateAxisArrows.z.visible = BOARD_DEPTH !== 1;
@@ -603,7 +602,7 @@ rebuildCoordinateGuide();
 updateCoordinateAxisVisibility();
 
 function coordinateNotation(x, y, z) {
-  // Version 1.28.16: Classic move notation is strictly two-dimensional.
+  // Classic move notation is strictly two-dimensional.
   // The internal z=0 layer remains authoritative, but Classic move sequences
   // must not expose that implementation detail as a third coordinate.
   if (BOARD_DEPTH === 1) {
@@ -627,7 +626,7 @@ function updateCoordinateGuideHighlight() {
     miniZCenters[z]
   );
   miniHighlightCube.visible = true;
-  // Version 1.25.12: Classic 8×8×1 does not use a Z-axis coordinate,
+  // Classic 8×8×1 does not use a Z-axis coordinate,
   // so its on-screen coordinate readout shows only the A–H / 1–8 pair.
   coordinateReadout.textContent = BOARD_DEPTH === 1
     ? `${xLabelLetters[x]} - ${y + 1}`
@@ -672,7 +671,7 @@ let undoHistory = [];
 let redoHistory = [];
 let historyReviewActive = false;
 
-// Version 1.13.1: bot plumbing repairs. The bot may enter playMove() through
+// bot plumbing repairs. The bot may enter playMove() through
 // the internal bot-move path while human input remains blocked during bot turns.
 let opponentMode = 'bot';
 let humanPlayer = BLACK;
@@ -683,7 +682,7 @@ let bookOpeningsEnabled = true;
 let botDeveloperEntries = [];
 let botDeveloperGameStartedAt = null;
 
-// Version 1.12.3: per-player game clocks. Remaining time is stored independently
+// per-player game clocks. Remaining time is stored independently
 // for each color; the active player's elapsed time is calculated from
 // performance.now() so browser timer throttling does not make the clock drift.
 let clockRemainingMs = { BLACK: 5 * 60 * 1000, WHITE: 5 * 60 * 1000 };
@@ -698,7 +697,7 @@ function key(x, y, z) {
 }
 
 function worldPosition(x, y, z) {
-  // Version 1.25.6: Classic 8×8×1 uses the established Reversi coordinate
+  // Classic 8×8×1 uses the established Reversi coordinate
   // orientation, with row 1 at the top while A remains on the left. The
   // underlying board coordinates stay unchanged so rules/history are stable.
   const visualY = BOARD_DEPTH === 1 ? (SIZE - 1 - y) : y;
@@ -825,12 +824,12 @@ function getSurfaceLevel(move) {
   return level;
 }
 
-// 1.18.16: corner awareness now applies to every supported board size.
+// corner awareness now applies to every supported board size.
 // A true corner is strongly preferred while it is available. A move adjacent
 // to an unclaimed or opponent-owned corner is discouraged, but once a corner
 // belongs to the bot, adjacent moves become favorable so the bot can build
 // outward from its secured corner. This same logic is now tested on 4×4×4,
-// where corners are available very early and the user observed the bot
+// where corners are available very early and gameplay observations the bot
 // avoiding them.
 function getCornerPosition(move, player) {
   let best = 0;
@@ -863,7 +862,7 @@ function updateBotDeveloperPanel() {
 
   const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   const lines = [
-    `Cube Reversi Bot Developer Summary — Version 1.31.12`,
+    `Cube Reversi Bot Developer Summary — Version 1.32.1`,
     `Board: ${boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
     `Browser: ${navigator.userAgent}`,
@@ -886,8 +885,8 @@ function updateBotDeveloperPanel() {
     lines.push(`Average Bot move time: ${averageMs.toFixed(1)} ms`);
     lines.push(`Average completed depth: ${averageDepth.toFixed(2)}`);
 
-    // Version 1.31.0: restore the root-candidate diagnostic history from
-    // Version 1.30.3 while retaining the Version 1.30.4 corner-access engine.
+    // restore the root-candidate diagnostic history from
+    // the established corner-access engine.
     // Developer Mode can now show how every legal root move ranked at each
     // completed iterative-deepening depth for every searched Bot move.
     const searchedEntries = botDeveloperEntries.filter((entry) =>
@@ -1065,7 +1064,7 @@ function makeInitialPosition() {
   const high = SIZE / 2;
 
   if (BOARD_DEPTH === 1) {
-    // Version 1.28.12: restore the standard Classic Reversi opening
+    // restore the standard Classic Reversi opening
     // orientation: Black on E-4 and D-5; White on D-4 and E-5.
     board[low][low][0] = WHITE;
     board[low][high][0] = BLACK;
@@ -1166,7 +1165,7 @@ function buildOccupiedSurfaceGeometry() {
 
         const center = worldPosition(x, y, z);
 
-        // Version 1.27.12: Classic uses the same complete six-face occupied
+        // Classic uses the same complete six-face occupied
         // cube shell as the true 3D boards. The difference is visual only: the
         // Classic camera is slightly elevated so this shell has visible depth,
         // while the logical board remains BOARD_DEPTH === 1.
@@ -1183,7 +1182,7 @@ function buildOccupiedSurfaceGeometry() {
             nz >= 0 && nz < BOARD_DEPTH &&
             board[nx][ny][nz] !== EMPTY;
 
-          // Version 1.27.19: Classic intentionally keeps every face of every
+          // Classic intentionally keeps every face of every
           // occupied cube, including faces shared with another occupied cube.
           // Classic is a single logical z=0 layer, so these internal faces do
           // not hide any cubes behind the occupied structure. Keeping them
@@ -1226,9 +1225,9 @@ function updateOccupiedSurface() {
     occupiedSurface.material.dispose();
   }
 
-  // Version 1.27.19: restore the transparent occupied-surface renderer used
-  // before the failed 1.27.17 opaque experiment. Classic remains logically
-  // 8×8×1; its visual camera/synchronized-model behavior is unchanged.
+  // restore the transparent occupied-surface renderer used
+  // used for the occupied-surface rendering. Classic remains logically 8×8×1;
+  // its visual camera and synchronized-model behavior are unchanged.
   // No separate Classic material path is introduced here.
   const geometry = buildOccupiedSurfaceGeometry();
   const material = new THREE.MeshBasicMaterial({
@@ -1369,7 +1368,7 @@ function updateLegalHighlightSurface() {
   }
 
   const [x, y, z] = highlightedLegalKey.split(',').map(Number);
-  // Version 1.25.5: keep one highlight mesh and move/update it instead of
+  // keep one highlight mesh and move/update it instead of
   // removing and recreating the mesh on every pointermove. This prevents
   // rapid cursor movement from producing visible highlight flashes.
   if (!legalHighlightSurface) {
@@ -1387,7 +1386,7 @@ function updateLegalHighlightSurface() {
     cubeGroup.add(legalHighlightSurface);
   }
 
-  // Version 1.25.5: orange-gold is used only for legal cubes adjacent to an
+  // orange-gold is used only for legal cubes adjacent to an
   // unoccupied corner on true 3D 6×6×6 and 8×8×8 boards. Classic 8×8×1
   // always uses the normal yellow highlight.
   const highlightColor = isAdjacentToUnoccupiedCorner(x, y, z) ? 0xffb000 : 0xffff00;
@@ -1437,8 +1436,8 @@ function getLegalSurfaceOpacity() {
   return minimumOpacity + (maximumOpacity - minimumOpacity) * Math.pow(rampProgress, 1.75);
 }
 
-// Version 1.22.17: blue legal-move surfaces use a synchronized 1-second
-// opacity pulse while the user is active. The animation is intentionally
+// blue legal-move surfaces use a synchronized 1-second
+// opacity pulse while the player is active. The animation is intentionally
 // stopped after 60 seconds of inactivity, or immediately when the browser tab
 // becomes hidden. While stopped, the legal surfaces remain at 35%.
 const BLUE_OPACITY_MIN = 0.10;
@@ -1454,7 +1453,7 @@ let blueOpacityStopTimer = null;
 function getBlueOpacity(now = performance.now()) {
   if (!blueOpacityAnimationActive) return BLUE_OPACITY_IDLE;
   const phase = ((now - blueOpacityCycleStartTime) % BLUE_OPACITY_CYCLE_MS) / BLUE_OPACITY_CYCLE_MS;
-  // Version 1.22.17: use a squared ease-in curve so the pulse spends more
+  // use a squared ease-in curve so the pulse spends more
   // of its cycle toward the lower-opacity end instead of rising linearly.
   const curvedPhase = phase * phase;
   return BLUE_OPACITY_MIN + (BLUE_OPACITY_MAX - BLUE_OPACITY_MIN) * curvedPhase;
@@ -1774,7 +1773,7 @@ function parseCoordinateNotation(value) {
   const compact = value.toUpperCase().replace(/\s+/g, '');
   const xLetters = xLabelLetters.slice(0, SIZE);
 
-  // Version 1.25.10: Classic 8×8×1 uses the standard two-part A-H / 1-8
+  // Classic 8×8×1 uses the standard two-part A-H / 1-8
   // coordinate notation. Internally it still uses z=0 so the authoritative
   // 3D board representation and move rules do not need a separate pathway.
   if (BOARD_DEPTH === 1) {
@@ -1801,7 +1800,7 @@ function parseCoordinateNotation(value) {
 
 
 // -----------------------------------------------------------------------------
-// Classic Opening Recognition — Version 1.29.0
+// Classic Opening Recognition
 // -----------------------------------------------------------------------------
 // This catalog is display-only. It does not change Bot move selection. It
 // recognizes established named openings and named continuations from the
@@ -1957,7 +1956,7 @@ function getRecognizedClassicOpening(history) {
 
   return candidates[0].line;
 }
-// Version 1.29.4: Book Openings applies only to 8×8×1 Classic mode, so
+// Book Openings applies only to 8×8×1 Classic mode, so
 // remove the sidebar control from all other board sizes.
 function updateBookOpeningControlAvailability() {
   const bookOpeningsControl = bookOpeningsToggle.closest('label');
@@ -2164,7 +2163,7 @@ function redoMove() {
   }
 
   // Redo always restores exactly one committed move. In Bot mode this lets
-  // the user move forward through the human and bot moves one at a time.
+  // the move sequence forward through the human and bot moves one at a time.
   // Clock time is deliberately not part of the undo/redo operation.
   const clockNow = performance.now();
   commitActiveClock(clockNow);
@@ -2243,7 +2242,7 @@ function showLoadSequencePanel(fromStartScreen = false) {
   if (fromStartScreen) {
     hideStartScreen();
   }
-  // Version 1.28.7: every opening starts with an empty sequence field so a
+  // every opening starts with an empty sequence field so a
   // previous test sequence cannot remain in the loader.
   loadSequenceInput.value = '';
   loadSequenceError.textContent = '';
@@ -2349,7 +2348,7 @@ function resetBoardForSequenceLoad() {
 }
 
 function loadMoveSequence() {
-  // Version 1.28.3: a two-part X-Y move sequence is the application's Classic
+  // a two-part X-Y move sequence is the application's Classic
   // 8×8×1 notation. Select that board before parsing so sequences loaded from
   // the Start Menu (or from a previously completed 3D game) are interpreted
   // correctly instead of being rejected as missing a Z coordinate.
@@ -2512,9 +2511,9 @@ function loadMoveSequence() {
   updateOccupiedSurface();
   updateLegalCells();
   updateStatus();
-  // Do not start a loaded game's clock or bot turn until the user has chosen
+  // Do not start a loaded game's clock or bot turn until the player has chosen
   // how to play the loaded position. The loaded sequence itself contains
-  // moves, but it does not identify which color the user wants to control.
+  // moves, but it does not identify which color the player wants to control.
   stopGameClock();
   gameDuration = 'unlimited';
   setClockPanelVisible(true);
@@ -2526,7 +2525,7 @@ function loadMoveSequence() {
   loadSequenceOpenedFromStart = false;
   hideLoadSequence();
 
-  // Always ask how the user wants to play a loaded sequence, including when
+  // Always ask how the player wants to play a loaded sequence, including when
   // the loaded position is already Game Complete. The choice is still needed
   // for Undo/Redo review so the loaded game retains the intended interaction
   // mode instead of silently becoming a Two Player game.
@@ -2650,7 +2649,7 @@ function handleCoordinateInputKey(event) {
     if (length === 0) return;
 
     // Remove one coordinate component at a time and keep the automatic
-    // separators intact. This prevents the user from getting stuck after
+    // separators intact. This prevents the player from getting stuck after
     // deleting a hyphen that the input system normally inserts itself.
     if (length === 1 || length === 2) {
       moveCoordinateInput.value = '';
@@ -2767,7 +2766,7 @@ function showResignationMessage(resignedPlayer) {
 function revealGreenCubesOnCompletion() {
   // When a game reaches a normal terminal position, reveal the occupied
   // green-cell surfaces for the final board view. This changes the toggle
-  // state normally; it does not lock the option, so the user can turn Green
+  // state normally; it does not lock the option, so the player can turn Green
   // Cubes back off afterward.
   if (!hideGreenCubesToggle.checked) {
     hideGreenCubesToggle.checked = true;
@@ -2924,8 +2923,8 @@ function resignGame() {
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
-  versionLabel.innerHTML = `<span class="version-number">Version 1.31.12</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
-  document.title = `Cube Reversi — 1.31.12`;
+  versionLabel.innerHTML = `<span class="version-number">Version 1.32.1</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  document.title = `Cube Reversi — 1.32.1`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 
@@ -2991,7 +2990,7 @@ function resetBoardForNewGame() {
   gameCompleteActive = false;
   gameInProgress = true;
 
-  // Version 1.24.1: Green Cubes and Blue Cubes are per-game display
+  // Green Cubes and Blue Cubes are per-game display
   // preferences. A completed game may reveal them automatically, but every
   // newly started game must return both options to their default OFF state.
   hideGreenCubesToggle.checked = false;
@@ -3022,7 +3021,7 @@ function updateStartScreenOptions() {
   const selectedOpponent = document.querySelector('input[name="opponentMode"]:checked')?.value || 'human';
   const colorHidden = selectedOpponent === 'human';
 
-  // Version 1.29.4: Bot Summary is only meaningful in Bot Opponent mode,
+  // Bot Summary is only meaningful in Bot Opponent mode,
   // so hide the Start Menu option entirely when Two Player is selected.
   const developerModeOption = document.getElementById('developerModeOption');
   const botModeSelected = selectedOpponent === 'bot';
@@ -3064,7 +3063,7 @@ function hideStartScreen() {
   startOverlay.setAttribute('aria-hidden', 'true');
 }
 
-// Version 1.21.2 / 1.28.x: keyboard navigation for the start menu. Arrow
+// keyboard navigation for the start menu. Arrow
 // keys move focus through the currently visible start-menu controls. Spacebar
 // selects the currently focused radio without advancing to another option.
 // Enter always starts the game while the start menu is visible. Outside the
@@ -3092,7 +3091,7 @@ function moveStartMenuFocus(direction) {
   focusables[nextIndex].focus({ preventScroll: true });
 }
 
-// Version 1.28.7: keep keyboard focus inside the Load Sequence dialog's
+// keep keyboard focus inside the Load Sequence dialog's
 // intended controls. The textarea is the entry point; Tab advances to Load,
 // then Cancel, and wraps back to the textarea. Shift+Tab reverses the cycle.
 function getLoadSequenceFocusableElements() {
@@ -3207,7 +3206,7 @@ function getFrontmostLegalHit() {
   const hits = raycaster.intersectObjects([...cellMeshes.values()], false);
   if (!hits.length) return null;
 
-  // Version 1.22.26: when green cubes are hidden, the hidden occupied cells
+  // when green cubes are hidden, the hidden occupied cells
   // must also be ignored by raycasting. This makes the interaction model match
   // the visual model: the pointer can see through the absent green surfaces to
   // a legal move behind them. The nearest legal cell along the pointer ray
@@ -3252,7 +3251,7 @@ function getFrontmostLegalHit() {
   return null;
 }
 
-// Version 1.18.3 — prevent iPhone pull-to-refresh without interfering with
+// prevent iPhone pull-to-refresh without interfering with
 // cube dragging. The 3D game surface already uses touch-action:none, so this
 // guard only suppresses downward browser refresh gestures that begin outside
 // the game surface while the page is at its top edge.
@@ -3311,7 +3310,7 @@ function armAutoRotateStopTimer() {
   autoRotateStopTimer = window.setTimeout(() => {
     autoRotateStopTimer = null;
 
-    // Re-check the activity timestamp when the timer fires so a user event
+    // Re-check the activity timestamp when the timer fires so a player event
     // that occurred while the timeout was being processed cannot be lost.
     const inactiveFor = performance.now() - autoRotateLastActivityTime;
     if (autoRotateEnabled && inactiveFor >= AUTO_ROTATE_TIMEOUT) {
@@ -3325,8 +3324,8 @@ function armAutoRotateStopTimer() {
   }, remaining);
 }
 
-// Version 1.22.8: Make the Auto-Rotate inactivity timer robust against
-// gameplay/UI event handling. Any qualifying user activity records the
+// Make the Auto-Rotate inactivity timer robust against
+// gameplay/UI event handling. Any qualifying player activity records the
 // activity time directly and rearms the timer from that timestamp. The
 // timeout callback also verifies the timestamp before disabling Auto-Rotate.
 function noteAutoRotateActivity() {
@@ -3376,7 +3375,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   raycaster.setFromCamera(pointer, camera);
 
   // Determine whether the pointer is actually over visible board geometry.
-  // Auto-rotation pauses while the cursor is over the cube so the user can
+  // Auto-rotation pauses while the cursor is over the cube so the player can
   // inspect or manipulate it without the model moving underneath the pointer.
   const visibleCubeObjects = cubeGroup.children.filter((object) =>
     object.visible && (object.isMesh || object.isLineSegments) &&
@@ -3496,12 +3495,12 @@ function startFlipAnimation() {
 }
 
 window.addEventListener('keydown', (event) => {
-  // Version 1.28.7: the Load Sequence dialog gets its own compact keyboard
+  // the Load Sequence dialog gets its own compact keyboard
   // focus cycle so the normal game's coordinate-entry Tab shortcut cannot
   // steal focus from its Load and Cancel buttons. Spacebar activates a focused
   // dialog button instead of toggling Auto-Rotate.
   if (loadSequenceOverlay.classList.contains('visible')) {
-    // Version 1.31.0: pressing Enter in the Load Sequence textarea submits
+    // pressing Enter in the Load Sequence textarea submits
     // the sequence instead of inserting a newline. This mirrors activating
     // the Load button while keeping the existing Tab/Space dialog behavior.
     if (event.key === 'Enter' && document.activeElement === loadSequenceInput) {
@@ -3573,7 +3572,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.22.18: Tab is reserved for the coordinate-entry field during
+  // Tab is reserved for the coordinate-entry field during
   // normal gameplay. Keep it as the only keyboard-tab destination so the
   // clickable header title and sidebar controls do not enter the tab order.
   if (event.key === 'Tab') {
@@ -3596,7 +3595,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.29.4: T toggles 3-Axis. The shortcut remains disabled in
+  // T toggles 3-Axis. The shortcut remains disabled in
   // Classic mode because 8×8×1 is a two-dimensional board.
   if (!isEditableTarget && event.key.toLowerCase() === 't') {
     if (BOARD_DEPTH !== 1) {
@@ -3608,7 +3607,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.25.12: L toggles Wireframe.
+  // L toggles Wireframe.
   if (!isEditableTarget && event.key.toLowerCase() === 'l') {
     showWireframeToggle.checked = !showWireframeToggle.checked;
     updateWireframeVisibility();
@@ -3616,7 +3615,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.25.12: J toggles Green Cubes.
+  // J toggles Green Cubes.
   if (!isEditableTarget && event.key.toLowerCase() === 'j') {
     hideGreenCubesToggle.checked = !hideGreenCubesToggle.checked;
     hideGreenCubesToggle.dispatchEvent(new Event('change'));
@@ -3624,8 +3623,8 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.25.12: I toggles Blue Cubes.
-  // Version 1.27.19: I is a global Blue Cubes shortcut. The coordinate-entry
+  // I toggles Blue Cubes.
+  // I is a global Blue Cubes shortcut. The coordinate-entry
   // field may have focus, but I is not a valid coordinate character (Classic
   // uses A–H, and 3D boards also use A–H for X), so the display shortcut can
   // safely run even when the field is active.
@@ -3643,21 +3642,21 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Version 1.24.6: M activates the existing Undo Move button.
+  // M activates the existing Undo Move button.
   if (!isEditableTarget && event.key.toLowerCase() === 'm') {
     undoMove();
     event.preventDefault();
     return;
   }
 
-  // Version 1.28.7: once global shortcuts that are intentionally allowed in
+  // once global shortcuts that are intentionally allowed in
   // editable fields have been handled, let the browser and the focused
   // control process all remaining editing keystrokes normally. This prevents
   // Ctrl+V in the Load Sequence textarea from reaching the game-view V
   // shortcut, while preserving the existing global I shortcut above.
   if (isEditableTarget) return;
 
-  // Version 1.25.1: K activates the existing Redo Move button/action.
+  // K activates the existing Redo Move button/action.
   if (!isEditableTarget && event.key.toLowerCase() === 'k') {
     redoMove();
     event.preventDefault();
@@ -3666,7 +3665,7 @@ window.addEventListener('keydown', (event) => {
 
   const step = 0.08;
 
-  // Version 1.21.2: keyboard zoom must update the ArcballControls-managed
+  // keyboard zoom must update the ArcballControls-managed
   // camera state without repeatedly fighting its animation/damping state.
   // Direct camera.position scaling while ArcballControls animations are active
   // can cause held-key zoom to oscillate instead of moving monotonically.
@@ -3704,7 +3703,7 @@ window.addEventListener('keydown', (event) => {
       case 'ArrowDown':
         cubeGroup.rotation.x += step;
         break;
-      // Version 1.25.12: . / / replace Q / E for Roll.
+      // . / / replace Q / E for Roll.
       case '.':
         cubeGroup.rotation.z -= step;
         break;
@@ -3714,7 +3713,7 @@ window.addEventListener('keydown', (event) => {
       case 'r':
         resetView();
         break;
-      // Version 1.25.12: V replaces F for Flip 180°.
+      // V replaces F for Flip 180°.
       case 'v':
         startFlipAnimation();
         break;
@@ -3904,12 +3903,12 @@ updateOccupiedSurface();
 updateLegalCells();
 updateStatus();
 
-// Version 1.12.0: the board is prepared behind the splash, but the game does
+// the board is prepared behind the splash, but the game does
 // not begin until the player confirms the start-screen choices.
 updateStartScreenOptions();
 startOverlay.classList.add('visible');
 startOverlay.setAttribute('aria-hidden', 'false');
-// Version 1.21.2: Start Game remains the keyboard-focused element on initial load;
+// Start Game remains the keyboard-focused element on initial load;
 // arrow keys navigate the start menu and Spacebar cycles focused radio groups.
 requestAnimationFrame(() => startGameButton.focus({ preventScroll: true }));
 
@@ -3927,7 +3926,7 @@ function animate(now) {
       cubeGroup.rotation.y = flipAnimationStartY + Math.PI;
     }
   } else if (autoRotateEnabled && !hoveringOverCube) {
-    // Auto-Rotate values are unchanged from the confirmed 1.20.36 baseline.
+    // Auto-Rotate uses the established motion settings.
     const frameScale = elapsedSeconds * 60;
     cubeGroup.rotation.y += 0.003 * frameScale;
     cubeGroup.rotation.x += 0.0065 * frameScale;
