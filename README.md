@@ -81,9 +81,8 @@ If proposing changes to the Bot, please include testing or benchmark results whe
 
 
 
-## License
 
-Copyright © 2026 Chris Dubendorf
+## License
 
 Cube Reversi is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -91,3 +90,12 @@ Foundation, either version 3 of the License, or (at your option) any later
 version.
 
 See LICENSE for the complete license text.
+
+
+
+
+## Contact
+
+feedback@cubereversi.com
+
+
