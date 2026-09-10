@@ -1036,6 +1036,36 @@ function classicCornerRiskScore(board, player, directions) {
 // corner access for the move to damage the edge structure. Count legal edge
 // intrusions for both sides and prefer positions where the opponent has fewer.
 // Keep it a soft Classic-only signal so genuine edge sacrifices remain possible.
+function cubeCornerRiskScore(board, player, size, depth) {
+  const other = opponent(player);
+  let score = 0;
+
+  // A cube corner is valuable in every board geometry. For 3D boards, use the
+  // three face-adjacent cells leading directly into each corner as a modest
+  // structural warning rather than applying Classic 8x8 X/C-square patterns.
+  for (const [cx, cy, cz] of cornerMoves(size, depth)) {
+    if (board[cx][cy][cz] !== EMPTY) continue;
+
+    const inward = [
+      [cx === 0 ? 1 : -1, 0, 0],
+      [0, cy === 0 ? 1 : -1, 0],
+      [0, 0, depth === 1 ? 0 : (cz === 0 ? 1 : -1)]
+    ];
+
+    for (const [dx, dy, dz] of inward) {
+      if (dx === 0 && dy === 0 && dz === 0) continue;
+      const x = cx + dx;
+      const y = cy + dy;
+      const z = cz + dz;
+      if (!inside(x, y, z, size, depth)) continue;
+      if (board[x][y][z] === player) score -= 2;
+      else if (board[x][y][z] === other) score += 2;
+    }
+  }
+
+  return score;
+}
+
 function classicEdgeIntrusionScore(board, player, size, depth, directions) {
   if (depth !== 1 || size !== 8) return 0;
 
@@ -1294,6 +1324,12 @@ function evaluateBreakdown(board, player, size, depth, directions, counts, known
   let edgeAttackScore = 0;
   let edgeIntrusionScore = 0;
   let cornerAccessScore = 0;
+  const ownLegalCorners = legalMoves(board, player, size, depth, directions)
+    .filter((move) => isCorner(move, size, depth)).length;
+  const otherLegalCorners = legalMoves(board, other, size, depth, directions)
+    .filter((move) => isCorner(move, size, depth)).length;
+  cornerAccessScore = ownLegalCorners - otherLegalCorners;
+
   if (depth === 1 && size === 8) {
     const ownFrontier = classicFrontierCount(board, player);
     const otherFrontier = classicFrontierCount(board, other);
@@ -1306,9 +1342,6 @@ function evaluateBreakdown(board, player, size, depth, directions, counts, known
     wedgeThreatScore = classicWedgeThreatScore(board, player, size, depth, directions);
     edgeAttackScore = classicEdgeAttackScore(board, player, size, depth, directions);
     edgeIntrusionScore = classicEdgeIntrusionScore(board, player, size, depth, directions);
-    const ownLegalCorners = classicLegalCornerCount(board, player, size, depth, directions);
-    const otherLegalCorners = classicLegalCornerCount(board, other, size, depth, directions);
-    cornerAccessScore = ownLegalCorners - otherLegalCorners;
   }
 
   const mobilityWeight = endgame ? 12 : (progress < 0.35 ? 34 : 30);
@@ -1324,7 +1357,7 @@ function evaluateBreakdown(board, player, size, depth, directions, counts, known
   const edgePatternWeight = depth === 1 ? (endgame ? 2 : 4) : 0;
   const patternWeight = depth === 1 ? (endgame ? 4 : (progress < 0.35 ? 9 : 7)) : 0;
   const cornerPattern5x2Weight = depth === 1 ? (endgame ? 3 : 5) : 0;
-  const cornerRiskWeight = depth === 1 ? (endgame ? 9 : 14) : 0;
+  const cornerRiskWeight = endgame ? 9 : 14;
   const cornerWeight = endgame ? 125 : 115;
   const cornerAccessWeight = endgame ? 140 : 95;
   const squareWeight = endgame ? 0.35 : (progress < 0.30 ? 1.1 : 0.8);
@@ -1350,9 +1383,15 @@ function evaluateBreakdown(board, player, size, depth, directions, counts, known
     edge: edgeWeight * edgeScore,
     edgeStructure: edgeStructureWeight * edgeStructureScore,
     edgePattern: edgePatternWeight * edgePatternScore,
-    patterns: patternWeight * (classicCornerPatternScore(board, player) + classicDiagonalPatternScore(board, player)),
-    cornerPattern5x2: cornerPattern5x2Weight * classicCorner5x2PatternScore(board, player),
-    cornerRisk: cornerRiskWeight * classicCornerRiskScore(board, player, directions),
+    patterns: patternWeight * (depth === 1 && size === 8
+      ? classicCornerPatternScore(board, player) + classicDiagonalPatternScore(board, player)
+      : 0),
+    cornerPattern5x2: cornerPattern5x2Weight * (depth === 1 && size === 8
+      ? classicCorner5x2PatternScore(board, player)
+      : 0),
+    cornerRisk: cornerRiskWeight * (depth === 1 && size === 8
+      ? classicCornerRiskScore(board, player, directions)
+      : cubeCornerRiskScore(board, player, size, depth)),
     discs: discWeight * discScore,
     parity: parityWeight * parityScore,
     position: squareWeight * squareScore,
