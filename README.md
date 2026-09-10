@@ -31,7 +31,7 @@ CubeReversiBot.js contains the Bot engine. The Bot evaluates the current positio
 - Legal-move highlighting
 - Multiple board and display controls
 - Browser-based implementation with no installation required
-- Open-source and designed for further development and contribution
+- Open-source, feedback and contributions welcome
 
 
 
