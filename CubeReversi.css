@@ -1,4 +1,4 @@
-/* Cube Reversi 1.32.25 */
+/* Cube Reversi 1.32.26 */
 
 /* loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -261,9 +261,11 @@
     width: min(94vw, 430px);
   }
 
-  /* Give the mobile panel a little more vertical room and keep the version
-     label comfortably above the bottom edge. */
+  /* On narrow screens, reserve the top-right area for the feedback address.
+     Moving the panel content down keeps the address clear of the title while
+     leaving the desktop layout unchanged. */
   #startPanel {
+    padding-top: 3.2rem;
     padding-bottom: 2rem;
   }
 
