@@ -862,7 +862,7 @@ function updateBotDeveloperPanel() {
 
   const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   const lines = [
-    `Cube Reversi Bot Developer Summary — Version 1.32.1`,
+    `Cube Reversi Bot Developer Summary — Version 1.32.2`,
     `Board: ${boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
     `Browser: ${navigator.userAgent}`,
@@ -2923,8 +2923,8 @@ function resignGame() {
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
-  versionLabel.innerHTML = `<span class="version-number">Version 1.32.1</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
-  document.title = `Cube Reversi — 1.32.1`;
+  versionLabel.innerHTML = `<span class="version-number">Version 1.32.2</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  document.title = `Cube Reversi — 1.32.2`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 

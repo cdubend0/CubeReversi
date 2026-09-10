@@ -1,4 +1,4 @@
-/* Cube Reversi 1.32.1 */
+/* Cube Reversi 1.32.2 */
 
 /* loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -156,12 +156,12 @@
 
 .start-menu-version {
   position: absolute;
-  top: 2rem;
-  right: 1rem;
+  left: 1.25rem;
+  bottom: .35rem;
   margin: 0;
   font-size: .75rem;
   opacity: .55;
-  text-align: right;
+  text-align: left;
 }
 
 /* keep the Bot Summary toggle on the same row as the
