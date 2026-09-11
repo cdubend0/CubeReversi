@@ -96,6 +96,8 @@ See LICENSE for the complete license text.
 
 ## Contact
 
-feedback@cubereversi.com
+Chris Dubendorf
+
+chris@cubereversi.com
 
 
