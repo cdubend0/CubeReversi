@@ -1,4 +1,4 @@
-/* Cube Reversi 1.33.0 */
+/* Cube Reversi 1.33.1 */
 
 /* loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -298,8 +298,6 @@
     bottom: .65rem;
   }
 }
-
-/* Cube Reversi 1.20.6 */
 
 :root {
   font-family: Arial, Helvetica, sans-serif;

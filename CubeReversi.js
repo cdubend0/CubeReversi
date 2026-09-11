@@ -1,4 +1,4 @@
-import { chooseMove } from './CubeReversiBot.js?v=1.33.0';
+import { chooseMove } from './CubeReversiBot.js?v=1.33.1';
 import * as THREE from 'three';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 
@@ -994,7 +994,7 @@ function createBotWorker() {
     return null;
   }
 
-  const botModuleUrl = new URL('./CubeReversiBot.js?v=1.33.0', import.meta.url).href;
+  const botModuleUrl = new URL('./CubeReversiBot.js?v=1.33.1', import.meta.url).href;
   const workerSource = `
     import { chooseMove } from ${JSON.stringify(botModuleUrl)};
     self.onmessage = (event) => {

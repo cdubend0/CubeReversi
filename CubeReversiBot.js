@@ -5,10 +5,6 @@
  * authoritative for game state, rules, legal moves, rendering, turn management,
  * and actually committing moves.
  *
- * 1.27.0 introduces a search-based engine for the first time. The implementation
- * is original Cube Reversi code informed by the documented Othello AI approaches
- * of ccurro/othelloAI and eigenfoo/otto-othello. No source code from either
- * project is copied into this file.
  */
 
 const EMPTY = 0;
@@ -20,7 +16,7 @@ const INF = 1e15;
 // 8×8×1 Classic board and the much larger 3D boards without freezing the UI.
 // Difficulty profiles are deliberately conservative in this first pass.
 // Easy uses a shallow search and a small amount of controlled variety. Medium
-// uses the full 1.27.0 search profile. Hard searches deeper and for longer.
+// uses the full medium search profile. Hard searches deeper and for longer.
 const DIFFICULTY_PROFILES = {
   easy: { classicTimeMs: 120, threeDTimeMs: 90, randomness: 0.55 },
   medium: { classicTimeMs: 650, threeDTimeMs: 450, randomness: 0.0 },
@@ -318,7 +314,7 @@ function createClassicOpeningBoard() {
   const board = Array.from({ length: 8 }, () =>
     Array.from({ length: 8 }, () => [EMPTY])
   );
-  // Standard Classic Reversi opening used by Cube Reversi 1.28.11+:
+  // Standard Classic Reversi opening:
   // Black E-4 / D-5, White D-4 / E-5.
   board[3][3][0] = WHITE;
   board[3][4][0] = BLACK;
