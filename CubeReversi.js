@@ -1,6 +1,6 @@
+import { chooseMove } from './CubeReversiBot.js?v=1.33.0';
 import * as THREE from 'three';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
-import { chooseMove } from './CubeReversiBot.js';
 
 /*
  * Cube Reversi Game Controller
@@ -71,10 +71,11 @@ const startGameButton = document.getElementById('startGameButton');
 const startLoadSequenceButton = document.getElementById('startLoadSequenceButton');
 const gameDurationLabel = document.getElementById('gameDurationLabel');
 const gameDurationSelect = document.getElementById('gameDuration');
-const gameDurationNote = document.getElementById('gameDurationNote');
 const colorFieldset = document.getElementById('colorFieldset');
 const opponentModeInputs = document.querySelectorAll('input[name="opponentMode"]');
+const botDifficultyInputs = document.querySelectorAll('input[name="botDifficulty"]');
 const sceneElement = document.getElementById('scene');
+const botThinkingIndicator = document.getElementById('botThinkingIndicator');
 const versionLabel = document.getElementById('versionLabel');
 const turnLabel = document.getElementById('turnLabel');
 const playingAsLabel = document.getElementById('playingAsLabel');
@@ -106,6 +107,7 @@ const botDeveloperOutput = document.getElementById('botDeveloperOutput');
 const copyBotDeveloperButton = document.getElementById('copyBotDeveloperButton');
 const loadedPlayerModeInputs = document.querySelectorAll('input[name="loadedPlayerMode"]');
 const loadedBotDifficultyInputs = document.querySelectorAll('input[name="loadedBotDifficulty"]');
+const botThinkingTimeInput = document.getElementById('botThinkingTime');
 const gameEndConfirmMessage = document.getElementById('gameEndConfirmMessage');
 const confirmGameEndButton = document.getElementById('confirmGameEndButton');
 const cancelGameEndButton = document.getElementById('cancelGameEndButton');
@@ -702,6 +704,10 @@ let clockRunning = false;
 let timeoutHandled = false;
 let gameClockTicker = null;
 let botMoveTimer = null;
+let botWorker = null;
+let botWorkerBlobUrl = null;
+let botSearchRequestId = 0;
+let botGameSessionId = 0;
 
 function key(x, y, z) {
   return `${x},${y},${z}`;
@@ -873,7 +879,7 @@ function updateBotDeveloperPanel() {
 
   const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   const lines = [
-    `Cube Reversi Bot Developer Summary — Version 1.32.29`,
+    `Cube Reversi Bot Developer Summary`,
     `Board: ${boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
     `Browser: ${navigator.userAgent}`,
@@ -982,15 +988,113 @@ async function copyBotDeveloperSummary() {
   }
 }
 
+function createBotWorker() {
+  if (botWorker) return botWorker;
+  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined') {
+    return null;
+  }
+
+  const botModuleUrl = new URL('./CubeReversiBot.js?v=1.33.0', import.meta.url).href;
+  const workerSource = `
+    import { chooseMove } from ${JSON.stringify(botModuleUrl)};
+    self.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type !== 'chooseMove') return;
+      const startedAt = performance.now();
+      try {
+        const move = chooseMove(data.moveOptions, data.context);
+        const elapsedMs = performance.now() - startedAt;
+        self.postMessage({
+          type: 'result',
+          requestId: data.requestId,
+          move,
+          elapsedMs,
+          searchStats: chooseMove.lastSearchStats || {}
+        });
+      } catch (error) {
+        self.postMessage({
+          type: 'error',
+          requestId: data.requestId,
+          message: error && error.message ? error.message : String(error)
+        });
+      }
+    };
+  `;
+
+  botWorkerBlobUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+  botWorker = new Worker(botWorkerBlobUrl, { type: 'module' });
+  return botWorker;
+}
+
+function destroyBotWorker() {
+  if (botWorker) {
+    botWorker.terminate();
+    botWorker = null;
+  }
+  if (botWorkerBlobUrl) {
+    URL.revokeObjectURL(botWorkerBlobUrl);
+    botWorkerBlobUrl = null;
+  }
+}
+
+function cancelBotSearch() {
+  botSearchRequestId++;
+  destroyBotWorker();
+}
+
+function chooseBotMoveInWorker(moveOptions, context) {
+  const worker = createBotWorker();
+  if (!worker) return Promise.reject(new Error('Web Worker support is unavailable.'));
+
+  const requestId = ++botSearchRequestId;
+  const sessionId = botGameSessionId;
+  return new Promise((resolve, reject) => {
+    const handleMessage = (event) => {
+      const data = event.data || {};
+      if (data.requestId !== requestId || sessionId !== botGameSessionId) return;
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+      if (data.type === 'result') {
+        resolve(data);
+      } else {
+        destroyBotWorker();
+        reject(new Error(data.message || 'Bot Worker search failed.'));
+      }
+    };
+    const handleError = (event) => {
+      worker.removeEventListener('message', handleMessage);
+      worker.removeEventListener('error', handleError);
+      destroyBotWorker();
+      reject(event.error || new Error(event.message || 'Bot Worker failed.'));
+    };
+    worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
+    worker.postMessage({ type: 'chooseMove', requestId, moveOptions, context });
+  });
+}
+
+function showBotThinkingIndicator() {
+  if (botThinkingIndicator) botThinkingIndicator.hidden = false;
+}
+
+function hideBotThinkingIndicator() {
+  if (botThinkingIndicator) botThinkingIndicator.hidden = true;
+}
+
 function scheduleBotTurn() {
   if (!isBotTurn() || passMessageActive || botMoveTimer !== null) return;
 
+  showBotThinkingIndicator();
   botMoveTimer = setTimeout(() => {
     botMoveTimer = null;
-    if (!isBotTurn() || passMessageActive) return;
+    if (!isBotTurn() || passMessageActive) {
+      hideBotThinkingIndicator();
+      return;
+    }
 
     const moves = legalMoves(currentPlayer);
     if (!moves.length) {
+      hideBotThinkingIndicator();
       const otherPlayer = opponent(currentPlayer);
       const otherMoves = legalMoves(otherPlayer);
       if (otherMoves.length) {
@@ -1019,18 +1123,27 @@ function scheduleBotTurn() {
     });
 
     const botSearchStartedAt = performance.now();
-    const move = chooseMove(moveOptions, {
+    const botContext = {
       boardSize: SIZE,
       boardDepth: BOARD_DEPTH,
       player: currentPlayer,
       difficulty: botDifficulty,
+      thinkingTimeMs: getConfiguredBotThinkingTimeMs(),
       developerMode,
       board: board.map((plane) => plane.map((row) => row.slice()))
-    });
-    const botSearchTimeMs = performance.now() - botSearchStartedAt;
-    const searchStats = chooseMove.lastSearchStats || {};
+    };
 
-    if (developerMode) {
+    chooseBotMoveInWorker(moveOptions, botContext).then((result) => {
+      const botSearchTimeMs = Number((result.elapsedMs ?? (performance.now() - botSearchStartedAt)).toFixed(1));
+      const move = result.move;
+      const searchStats = result.searchStats || {};
+
+      if (!isBotTurn() || passMessageActive) {
+        hideBotThinkingIndicator();
+        return;
+      }
+
+      if (developerMode) {
       botDeveloperEntries.push({
         moveNumber: moveSequenceHistory.length + 1,
         color: currentPlayer === BLACK ? 'Black' : 'White',
@@ -1063,10 +1176,63 @@ function scheduleBotTurn() {
             }))
           : []
       });
-      updateBotDeveloperPanel();
-    }
+        updateBotDeveloperPanel();
+      }
 
-    playMove(move[0], move[1], move[2], true);
+      hideBotThinkingIndicator();
+      playMove(move[0], move[1], move[2], true);
+    }).catch((error) => {
+      console.error('Cube Reversi Bot Worker error:', error);
+      hideBotThinkingIndicator();
+      // Keep the game playable if a browser blocks module workers. The normal
+      // Bot engine remains the authoritative fallback path.
+      try {
+        const fallbackStartedAt = performance.now();
+        const fallbackMove = chooseMove(moveOptions, botContext);
+        const fallbackSearchTimeMs = performance.now() - fallbackStartedAt;
+        const fallbackStats = chooseMove.lastSearchStats || {};
+        if (developerMode) {
+          botDeveloperEntries.push({
+            moveNumber: moveSequenceHistory.length + 1,
+            color: currentPlayer === BLACK ? 'Black' : 'White',
+            coordinate: coordinateNotation(fallbackMove[0], fallbackMove[1], fallbackMove[2]),
+            timeMs: Number(fallbackSearchTimeMs.toFixed(1)),
+            depth: fallbackStats.completedDepth ?? 0,
+            targetDepth: fallbackStats.targetDepth ?? 0,
+            nodes: fallbackStats.nodes ?? 0,
+            leaves: fallbackStats.leaves ?? 0,
+            cutoffs: fallbackStats.cutoffs ?? 0,
+            tableEntries: fallbackStats.tableEntries ?? 0,
+            source: fallbackStats.source || 'SEARCH',
+            bookName: fallbackStats.bookName || '',
+            rootCandidateScores: Array.isArray(fallbackStats.rootCandidateScores)
+              ? fallbackStats.rootCandidateScores.map((candidate) => ({
+                  move: candidate.move.slice(),
+                  score: candidate.score,
+                  breakdown: candidate.breakdown ? { ...candidate.breakdown } : null
+                }))
+              : [],
+            rootCandidateScoreHistory: Array.isArray(fallbackStats.rootCandidateScoreHistory)
+              ? fallbackStats.rootCandidateScoreHistory.map((iteration) => ({
+                  depth: iteration.depth,
+                  candidates: Array.isArray(iteration.candidates)
+                    ? iteration.candidates.map((candidate) => ({
+                        move: candidate.move.slice(),
+                        score: candidate.score
+                      }))
+                    : []
+                }))
+              : []
+          });
+          updateBotDeveloperPanel();
+        }
+        if (isBotTurn() && !passMessageActive) {
+          playMove(fallbackMove[0], fallbackMove[1], fallbackMove[2], true);
+        }
+      } catch (fallbackError) {
+        console.error('Cube Reversi Bot fallback error:', fallbackError);
+      }
+    });
   }, 250);
 }
 
@@ -2057,8 +2223,10 @@ function deriveCurrentPlayerFromHistory(history, fallbackPlayer) {
       continue;
     }
 
-    // Every coordinate entry represents one completed turn.
-    if (/^[A-H]-\d+-[S-Z]$/i.test(entry)) {
+    // Every coordinate entry represents one completed turn. Support both
+    // Classic 8×8×1 notation (A-1 through H-8) and 3D notation
+    // (A-1-S through H-8-Z).
+    if (/^[A-H]-\d+(?:-[S-Z])?$/i.test(entry)) {
       player = opponent(player);
     }
   }
@@ -2124,6 +2292,8 @@ function undoMove() {
     clearTimeout(botMoveTimer);
     botMoveTimer = null;
   }
+  cancelBotSearch();
+  hideBotThinkingIndicator();
 
   // Undo/Redo never rewinds clock time. Commit the currently active clock
   // before changing game state, then let the restored current player continue
@@ -2172,6 +2342,8 @@ function redoMove() {
     clearTimeout(botMoveTimer);
     botMoveTimer = null;
   }
+  cancelBotSearch();
+  hideBotThinkingIndicator();
 
   // Redo always restores exactly one committed move. In Bot mode this lets
   // the move sequence forward through the human and bot moves one at a time.
@@ -2934,7 +3106,7 @@ function resignGame() {
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
-  versionLabel.innerHTML = `<span class="version-number">Version 1.32.29</span><span class="version-separator"> · </span><span class="version-board-size">${boardSizeText}</span>`;
+  versionLabel.innerHTML = `<span class="version-board-size">${boardSizeText}</span>`;
   document.title = `Cube Reversi`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
@@ -2985,7 +3157,14 @@ function rebuildBoardForSize(newSize) {
 }
 
 function resetBoardForNewGame() {
+  // A new game is a hard session boundary. Invalidate any asynchronous Bot
+  // result from the previous game, terminate its Worker, and clear all
+  // per-game diagnostic/history state before the new opening position is built.
+  botGameSessionId++;
   if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+  cancelBotSearch();
+  hideBotThinkingIndicator();
+  resetBotDeveloperSummary();
   stopGameClockTicker();
   clockRunning = false;
   clockTurnStartedAt = null;
@@ -3015,6 +3194,9 @@ function resetBoardForNewGame() {
   undoHistory = [];
   redoHistory = [];
   historyReviewActive = false;
+  if (moveCoordinateInput) moveCoordinateInput.value = '';
+  if (loadSequenceInput) loadSequenceInput.value = '';
+  if (loadSequenceError) loadSequenceError.textContent = '';
   updateMoveSequenceDisplay();
   updateUndoButton();
   updateRedoButton();
@@ -3027,6 +3209,39 @@ function resetBoardForNewGame() {
   updateLegalCells();
   updateStatus();
   resetView();
+}
+
+const BOT_THINKING_TIME_DEFAULTS = {
+  easy: 0.1,
+  medium: 0.7,
+  hard: 5
+};
+
+function setBotThinkingTimeDefault() {
+  if (!botThinkingTimeInput) return;
+  const difficulty = document.querySelector('input[name="botDifficulty"]:checked')?.value || 'medium';
+  botThinkingTimeInput.value = String(BOT_THINKING_TIME_DEFAULTS[difficulty] ?? BOT_THINKING_TIME_DEFAULTS.medium);
+}
+
+function sanitizeBotThinkingTimeInput() {
+  if (!botThinkingTimeInput) return;
+  let value = botThinkingTimeInput.value.replace(/[^0-9.]/g, '');
+  const firstDot = value.indexOf('.');
+  if (firstDot !== -1) {
+    value = value.slice(0, firstDot + 1) + value.slice(firstDot + 1).replace(/\./g, '');
+    const decimalPart = value.slice(firstDot + 1, firstDot + 2);
+    value = value.slice(0, firstDot + 1) + decimalPart;
+  }
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue) && numericValue > 10) value = '10';
+  botThinkingTimeInput.value = value;
+}
+
+function getConfiguredBotThinkingTimeMs() {
+  if (!botThinkingTimeInput) return null;
+  const value = Number(botThinkingTimeInput.value);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return Math.min(10, value) * 1000;
 }
 
 function updateStartScreenOptions() {
@@ -3055,14 +3270,13 @@ function updateStartScreenOptions() {
   gameDurationSelect.classList.toggle('start-hidden', botModeSelected);
   if (botModeSelected) {
     gameDurationSelect.value = 'unlimited';
-    gameDurationNote.textContent = 'Game clock is disabled in Bot Mode';
-  } else {
-    gameDurationNote.textContent = '';
   }
 }
 
 function showStartScreen() {
   if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+  cancelBotSearch();
+  hideBotThinkingIndicator();
   stopGameClock();
   setClockPanelVisible(false);
   updateStartScreenOptions();
@@ -3144,10 +3358,13 @@ function startGameFromSplash() {
   developerMode = !!developerModeToggle?.checked;
 
   gameInProgress = true;
-  resetBotDeveloperSummary();
   resetBoardForNewGame();
   initializeGameClock();
   hideStartScreen();
+  // Start the Worker immediately for Bot games so its module can load before
+  // the first search is requested. The Worker remains alive for the entire
+  // game and is destroyed at the next New Game / Start Menu boundary.
+  if (opponentMode === 'bot') createBotWorker();
   scheduleBotTurn();
 }
 
@@ -3885,6 +4102,18 @@ hideGreenCubesToggle.addEventListener('change', () => {
 opponentModeInputs.forEach((input) => {
   input.addEventListener('change', updateStartScreenOptions);
 });
+
+botDifficultyInputs.forEach((input) => {
+  input.addEventListener('change', setBotThinkingTimeDefault);
+});
+
+if (botThinkingTimeInput) {
+  botThinkingTimeInput.addEventListener('input', sanitizeBotThinkingTimeInput);
+  botThinkingTimeInput.addEventListener('blur', () => {
+    sanitizeBotThinkingTimeInput();
+    if (botThinkingTimeInput.value === '') setBotThinkingTimeDefault();
+  });
+}
 
 developerModeToggle.addEventListener('change', () => {
   developerMode = developerModeToggle.checked;

@@ -22,9 +22,9 @@ const INF = 1e15;
 // Easy uses a shallow search and a small amount of controlled variety. Medium
 // uses the full 1.27.0 search profile. Hard searches deeper and for longer.
 const DIFFICULTY_PROFILES = {
-  easy: { classicTimeMs: 120, threeDTimeMs: 90, classicMaxDepth: 1, threeDMaxDepth: 1, randomness: 0.55 },
-  medium: { classicTimeMs: 650, threeDTimeMs: 450, classicMaxDepth: 5, threeDMaxDepth: 3, randomness: 0.0 },
-  hard: { classicTimeMs: 3000, threeDTimeMs: 1100, classicMaxDepth: 9, threeDMaxDepth: 4, randomness: 0.0 }
+  easy: { classicTimeMs: 120, threeDTimeMs: 90, randomness: 0.55 },
+  medium: { classicTimeMs: 650, threeDTimeMs: 450, randomness: 0.0 },
+  hard: { classicTimeMs: 5000, threeDTimeMs: 5000, randomness: 0.0 }
 };
 const CLASSIC_ENDGAME_EMPTY = 10;
 const THREE_D_ENDGAME_EMPTY = 8;
@@ -1717,18 +1717,19 @@ export function chooseMove(moveOptions, context = null) {
     }
   }
 
-  const maxDepth = depth === 1 ? profile.classicMaxDepth : profile.threeDMaxDepth;
-  const timeLimit = depth === 1 ? profile.classicTimeMs : profile.threeDTimeMs;
+  const defaultTimeLimit = depth === 1 ? profile.classicTimeMs : profile.threeDTimeMs;
+  const customTimeLimit = Number(context.thinkingTimeMs);
+  const timeLimit = Number.isFinite(customTimeLimit) && customTimeLimit >= 0
+    ? Math.min(10000, customTimeLimit)
+    : defaultTimeLimit;
   const deadline = performance.now() + timeLimit;
 
-  // Hard Classic uses a 3-second budget so the search can exploit the improved move ordering.
-  // Near a finished game, favor complete search. Iterative deepening will still
-  // stop at the time limit, so the browser remains responsive.
-  const targetDepth = profile.randomness > 0
-    ? maxDepth
-    : counts.empty <= (depth === 1 ? CLASSIC_ENDGAME_EMPTY : THREE_D_ENDGAME_EMPTY)
-      ? Math.max(maxDepth, counts.empty + 2)
-      : maxDepth;
+  // Search depth is no longer capped by a fixed difficulty-specific maximum.
+  // The remaining empty cells provide a practical game-state ceiling, while the
+  // time deadline remains the actual limit on how much search can be completed.
+  // This lets 3D Hard use all available thinking time when deeper iterations are
+  // still possible, without allowing an unbounded recursion depth.
+  const targetDepth = Math.max(1, counts.empty + 2);
 
   let bestMove = moveOptions[0].move;
   let previousBest = bestMove;

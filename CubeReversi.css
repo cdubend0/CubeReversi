@@ -1,4 +1,4 @@
-/* Cube Reversi 1.32.29 */
+/* Cube Reversi 1.33.0 */
 
 /* loaded-sequence score visibility and game-start splash/settings screen */
 #startOverlay {
@@ -107,6 +107,31 @@
   margin: 0;
 }
 
+.bot-thinking-time-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .55rem;
+  padding-top: .65rem;
+  border-top: 1px solid rgba(255,255,255,.08);
+  font-size: .9rem;
+}
+
+.bot-thinking-time-row label {
+  font-weight: 700;
+}
+
+#botThinkingTime {
+  width: 4.5rem;
+  padding: .35rem .45rem;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: .4rem;
+  background: #111518;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
 .start-option small {
   opacity: .55;
 }
@@ -161,7 +186,7 @@
 .start-menu-version {
   position: absolute;
   left: 1.25rem;
-  bottom: .85rem;
+  bottom: .3rem;
   margin: 0;
   font-size: .75rem;
   opacity: .55;
@@ -175,7 +200,7 @@
   justify-content: center;
   align-items: center;
   gap: .65rem;
-  margin-top: 1.25rem;
+  margin-top: .45rem;
 }
 
 #startActionRow button {
@@ -226,11 +251,11 @@
   #startActionRow .developer-mode-option {
     position: absolute;
     left: 0;
-    bottom: .7rem;
+    bottom: .5rem;
   }
 
   .start-menu-version {
-    bottom: .85rem;
+    bottom: .65rem;
   }
 }
 
@@ -393,8 +418,6 @@ h1 {
   text-align: left;
 }
 
-.version-number,
-.version-separator,
 .version-board-size {
   display: inline;
 }
@@ -478,6 +501,25 @@ main {
   -webkit-user-drag: none;
   width: 100%;
   height: 100%;
+}
+
+/* Bot thinking indicator */
+#botThinkingIndicator {
+  position: absolute;
+  top: .85rem;
+  right: .85rem;
+  width: 50px;
+  height: 50px;
+  display: block;
+  z-index: 11;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+#botThinkingIndicator[hidden] {
+  display: none;
 }
 
 .controls {
@@ -791,9 +833,6 @@ button:disabled:hover {
     gap: .1rem;
   }
 
-  .version-separator {
-    display: none;
-  }
 
   .version-board-size {
     display: block;
@@ -982,13 +1021,15 @@ button:disabled:hover {
   overflow: auto;
 }
 
-#sequenceActions {
+#moveSequenceActions,
+#loadSequenceActions {
   display: flex;
   gap: .6rem;
   justify-content: flex-end;
 }
 
-#sequenceActions button {
+#moveSequenceActions button,
+#loadSequenceActions button {
   width: auto;
   min-width: 90px;
   margin-top: .75rem;

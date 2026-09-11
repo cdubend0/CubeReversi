@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Play Cube Reversi in your browser on 4×4×4, 6×6×6, and 8×8×8 3D boards, or play Classic 8×8 Reversi against another player or the AI Bot.">
   <title>Cube Reversi</title>
-  <link rel="stylesheet" href="CubeReversi.css?v=1.32.29">
+  <link rel="stylesheet" href="CubeReversi.css?v=1.33.0">
   <link rel="icon" type="image/png" href="CubeReversiIcon.png">
   <link rel="canonical" href="https://cubereversi.com/">
   <meta property="og:title" content="Cube Reversi">
@@ -95,6 +95,10 @@
             <input type="radio" name="botDifficulty" value="hard">
             <span>Hard</span>
           </label>
+          <div class="bot-thinking-time-row">
+            <label for="botThinkingTime">Thinking Time</label>
+            <input id="botThinkingTime" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="0.7" aria-label="Bot thinking time in seconds">
+          </div>
         </fieldset>
       </div>
 
@@ -108,7 +112,6 @@
         <option value="unlimited">Unlimited</option>
       </select>
 
-      <p id="gameDurationNote" class="start-note"></p>
       <div id="startActionRow">
         <label id="developerModeOption" class="start-option developer-mode-option" for="developerModeToggle">
           <input id="developerModeToggle" type="checkbox">
@@ -118,7 +121,7 @@
         <button id="startGameButton" type="button" autofocus>Start Game</button>
       </div>
       <a class="start-menu-feedback" href="mailto:feedback@cubereversi.com?subject=Cube%20Reversi%20Feedback">feedback@cubereversi.com</a>
-      <div class="start-menu-version" aria-label="Version 1.32.29">Version 1.32.29</div>
+      <div class="start-menu-version">Version 1.33.0</div>
     </div>
   </div>
       <div id="loadedSequenceChoiceOverlay" aria-hidden="true">
@@ -177,7 +180,7 @@
         <h1 id="brandTitle" role="button" tabindex="-1" aria-label="Start a new game">Cube Reversi</h1>
       </div>
       <div id="versionLabel" class="version">
-        <span class="version-number">Version 1.32.29</span><span class="version-separator"> · </span><span class="version-board-size">4×4×4</span>
+        <span class="version-board-size">4×4×4</span>
       </div>
     </div>
     <div class="status-panel">
@@ -195,6 +198,7 @@
   <main>
     <section id="game">
       <div id="scene" aria-label="Three-dimensional Cube Reversi board"></div>
+      <img id="botThinkingIndicator" src="ReversiThinking.webp" alt="Bot thinking" hidden>
       <div id="bookOpeningLabel" class="book-opening-label" aria-live="polite" hidden></div>
       <div id="coordinateAxes" aria-label="Cube coordinate axes"></div>
       <div id="coordinateReadout" aria-live="polite"></div>
@@ -226,7 +230,7 @@
         <div id="sequencePanel" role="dialog" aria-modal="true" aria-labelledby="sequenceTitle">
           <h2 id="sequenceTitle">Move Sequence</h2>
           <textarea id="moveSequence" readonly spellcheck="false" aria-label="Move sequence"></textarea>
-          <div id="sequenceActions">
+          <div id="moveSequenceActions">
             <button id="copySequenceButton" type="button">Copy</button>
             <button id="closeSequenceButton" type="button">Close</button>
           </div>
@@ -247,7 +251,7 @@
           <p>Paste a Cube Reversi move sequence below. Use coordinates separated by commas; use PASS when a player passes.</p>
           <textarea id="loadSequenceInput" spellcheck="false" aria-label="Move sequence to load" placeholder="D-2-S, D-4-T, B-4-S"></textarea>
           <div id="loadSequenceError" role="alert" aria-live="polite"></div>
-          <div id="sequenceActions">
+          <div id="loadSequenceActions">
             <button id="loadSequenceButtonConfirm" type="button">Load</button>
             <button id="cancelLoadSequenceButton" type="button">Cancel</button>
           </div>
@@ -322,6 +326,6 @@
     }
   }
   </script>
-  <script type="module" src="CubeReversi.js?v=1.32.29"></script>
+  <script type="module" src="CubeReversi.js?v=1.33.0"></script>
 </body>
 </html>
