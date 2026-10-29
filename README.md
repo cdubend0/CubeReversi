@@ -83,6 +83,9 @@ Classic opening names were also checked against the weltyc/othello openings
 list, Edax's opening.c list, and the French Federation of Othello opening
 page.
 
+Peter Alfeld's 3D Reversi pages (University of Utah) were a reference for
+Reversi played on a cube.
+
 These projects and resources were consulted as research and design references.
 The Cube Reversi implementation is independently written.
 
@@ -118,4 +121,4 @@ Chris Dubendorf
 
 chris@cubereversi.com
 
-X.com @ChrisDubendorf
+@ChrisDubendorf
