@@ -2,6 +2,8 @@
 
 A browser-based 3D implementation of the classic game Reversi played on a cube, supporting 4x4x4, 6x6x6, and 8x8x8 boards, along with a dedicated Classic 8x8 mode and a Bot opponent.
 
+The current version is 2.0.9. The live game is at https://cubereversi.com.
+
 
 
 
@@ -25,6 +27,15 @@ CubeReversiBot.js contains the Bot engine. The Bot evaluates the current positio
 - Classic 8×8 Reversi mode
 - Human vs. Human and Human vs. Bot play
 - Dedicated Bot with configurable search and evaluation
+- Bot difficulty levels: Easy, Medium, and Hard, with a thinking-time setting
+- Bot vs Bot mode:
+  - Level and thinking time for each Bot
+  - Pause and resume
+  - Automatic next-game countdown
+  - Win tally
+  - Bots swap colors each game
+- Opening book for Classic and cube openings, plus an Opening Book (PDF) study guide
+- Rewind in Bot vs Bot, to look back through moves and return to the live game
 - 3D board interaction and camera controls
 - Coordinate-based move entry
 - Move history and game-state tracking
@@ -50,7 +61,8 @@ Cube Reversi was developed with substantial assistance from AI coding and reason
 AI-generated suggestions were reviewed, tested, modified, and integrated by the project author. The project author is responsible for the final code and implementation.
 
 AI systems used during development include:
-OpenAI ChatGPT — primary development and implementation assistance.
+OpenAI ChatGPT — primary assistance for the earlier versions.
+Grok Bot, an AI assistant — later versions (through 2.0.9). Grok Bot used Cursor cloud agents for coding and commits. This covered the 3D cube opening book, the study PDF, Bot vs Bot, bot level tuning and self-play testing, and UI updates.
 
 
 
@@ -64,6 +76,10 @@ and research.
 Research references include Othello-Sensei, Deft Reversi, ccurro/othelloAI,
 Otto Othello, the British Othello Federation, Othello Belgium, and other
 public Othello/Reversi resources.
+
+Classic opening names were also checked against the weltyc/othello openings
+list, Edax's opening.c list, and the French Federation of Othello opening
+page.
 
 These projects and resources were consulted as research and design references.
 The Cube Reversi implementation is independently written.

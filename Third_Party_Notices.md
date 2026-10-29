@@ -114,6 +114,45 @@ unbalanced edges, and the relationship between edge play and corner access.
 
 This material was used as a gameplay and strategy reference, not as software code.
 
+## weltyc/othello
+
+**Project:** weltyc/othello  
+**Repository:** https://github.com/weltyc/othello  
+**License:** GNU General Public License v3.0  
+**Opening list:** https://github.com/weltyc/othello/blob/master/src/com/welty/othello/thor/openings.txt
+
+The weltyc/othello public openings list was consulted for Classic opening names
+and move sequences. Version 2.0.9 checked Rose-Bill, Nicolet, Leader's Tiger,
+and Aubrey / Tanaka against this list.
+
+No weltyc/othello source code has been intentionally copied into Cube Reversi.
+
+## Edax
+
+**Project:** Edax  
+**Author:** Richard Delorme and Toshihiko Okuhara  
+**Repository:** https://github.com/abulmo/edax-reversi  
+**License:** GNU General Public License v3.0  
+**Opening list:** https://github.com/abulmo/edax-reversi/blob/master/src/opening.c
+
+Edax's opening.c list was consulted when checking Classic opening names. Version
+2.0.9 checked Rose-Bill, Nicolet, Leader's Tiger, and Aubrey / Tanaka against
+this list. Edax was also consulted, with Othello Sensei, for corner value,
+X/C-square danger, edge structure, and related evaluation ideas.
+
+No Edax source code has been intentionally copied into Cube Reversi.
+
+## French Federation of Othello
+
+**Organization:** French Federation of Othello  
+**Opening strategy:** https://www.ffothello.org/strategie/comment-jouer-les-ouvertures/
+
+The French Federation of Othello's opening strategy page was consulted for
+established Classic openings, including Tiger, Rose, Buffalo, Heath, Horse, and
+Shaman, and for the corresponding move sequences.
+
+This material was used as a gameplay and strategy reference, not as software code.
+
 ## General Othello/Reversi Research
 
 Cube Reversi also draws on the broader body of established Othello/Reversi

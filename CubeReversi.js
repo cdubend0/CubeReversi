@@ -1,4 +1,4 @@
-import { chooseMove } from './CubeReversiBot.js?v=1.33.1';
+import { chooseMove, recognizeCubeOpening } from './CubeReversiBot.js?v=2.0.9';
 import * as THREE from 'three';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 
@@ -108,6 +108,27 @@ const copyBotDeveloperButton = document.getElementById('copyBotDeveloperButton')
 const loadedPlayerModeInputs = document.querySelectorAll('input[name="loadedPlayerMode"]');
 const loadedBotDifficultyInputs = document.querySelectorAll('input[name="loadedBotDifficulty"]');
 const botThinkingTimeInput = document.getElementById('botThinkingTime');
+const blackBotThinkingTimeInput = document.getElementById('blackBotThinkingTime');
+const whiteBotThinkingTimeInput = document.getElementById('whiteBotThinkingTime');
+const blackBotFieldset = document.getElementById('blackBotFieldset');
+const whiteBotFieldset = document.getElementById('whiteBotFieldset');
+const botVsBotPauseButton = document.getElementById('botVsBotPauseButton');
+// 2.0.4: round Pause/Resume button on the board itself (Bot vs Bot only).
+const boardPauseButton = document.getElementById('boardPauseButton');
+const botVsBotStopButton = document.getElementById('botVsBotStopButton');
+// 2.0.9: Bot vs Bot rewind controls (panel row and on-board bar).
+const rewindBackButton = document.getElementById('rewindBackButton');
+const rewindForwardButton = document.getElementById('rewindForwardButton');
+const rewindLiveButton = document.getElementById('rewindLiveButton');
+const boardRewindButton = document.getElementById('boardRewindButton');
+const boardRewindBar = document.getElementById('boardRewindBar');
+const boardRewindBackButton = document.getElementById('boardRewindBackButton');
+const boardRewindForwardButton = document.getElementById('boardRewindForwardButton');
+const boardRewindLiveButton = document.getElementById('boardRewindLiveButton');
+const boardRewindLabel = document.getElementById('boardRewindLabel');
+const botVsBotTallyLabel = document.getElementById('botVsBotTallyLabel');
+const topbarElement = document.querySelector('.topbar');
+const botVsBotCountdownLabel = document.getElementById('botVsBotCountdownLabel');
 const gameEndConfirmMessage = document.getElementById('gameEndConfirmMessage');
 const confirmGameEndButton = document.getElementById('confirmGameEndButton');
 const cancelGameEndButton = document.getElementById('cancelGameEndButton');
@@ -138,7 +159,17 @@ const moveEntry = document.getElementById('moveEntry');
 const moveCoordinateInput = document.getElementById('moveCoordinate');
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x16472a);
+// 2.0.2: the laptop/desktop green stays exactly 0x16472a. On phones (the same
+// max-width 760px test as the CSS phone layout and isMobileViewport()) the
+// scene uses a modestly lighter green so the transparent blue cubes stand out.
+// The colour follows the media query live (rotation / window resize).
+const SCENE_BACKGROUND_DESKTOP = 0x16472a;
+const SCENE_BACKGROUND_PHONE = 0x1f5c37;
+const phoneBackgroundQuery = window.matchMedia('(max-width: 760px)');
+function sceneBackgroundColor() {
+  return phoneBackgroundQuery.matches ? SCENE_BACKGROUND_PHONE : SCENE_BACKGROUND_DESKTOP;
+}
+scene.background = new THREE.Color(sceneBackgroundColor());
 
 const camera = new THREE.PerspectiveCamera(
   42,
@@ -149,10 +180,29 @@ const camera = new THREE.PerspectiveCamera(
 setInitialCameraPosition();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setClearColor(0x16472a, 1);
+renderer.setClearColor(sceneBackgroundColor(), 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(sceneElement.clientWidth, sceneElement.clientHeight);
 sceneElement.appendChild(renderer.domElement);
+
+// 2.0.4: on phones the taller controls-drawer handle reaches up into the
+// bottom of the game area. Shift the rendered view up by part of the handle
+// height (a camera view offset, so aspect, zoom and picking are unchanged)
+// so the board stays centred in the space above the handle. Desktop: none.
+const controlsHandleElement = document.getElementById('controlsHandle');
+function applyPhoneBoardViewOffset() {
+  const width = sceneElement.clientWidth;
+  const height = sceneElement.clientHeight;
+  const handleHeight = controlsHandleElement && isMobileViewport()
+    ? controlsHandleElement.offsetHeight : 0;
+  const shift = Math.round(handleHeight * 0.3);
+  if (shift > 0 && width > 0 && height > 0) {
+    camera.setViewOffset(width, height, 0, shift, width, height);
+  } else {
+    camera.clearViewOffset();
+  }
+}
+applyPhoneBoardViewOffset();
 
 const controls = new ArcballControls(camera, renderer.domElement, scene);
 // keep ArcballControls rotation but hide its on-screen
@@ -264,7 +314,9 @@ function updateHelpKeyAvailability() {
   const classicOpeningsHelp = document.getElementById('classicOpeningsHelp');
   const threeAxisHelp = document.getElementById('threeAxisHelp');
   const isClassic = SIZE === 8 && BOARD_DEPTH === 1;
-  if (classicOpeningsHelp) classicOpeningsHelp.hidden = !isClassic;
+  // 1.35.0: the O shortcut also works on the 4×4×4, 6×6×6 and 8×8×8 cubes.
+  // (1.35.1: the toggle handler now honours it there too).
+  if (classicOpeningsHelp) classicOpeningsHelp.hidden = !boardHasOpeningNames();
   if (threeAxisHelp) threeAxisHelp.hidden = isClassic;
 }
 
@@ -432,7 +484,7 @@ document.addEventListener('visibilitychange', () => {
   requestRender();
   // Returning to the tab does not automatically restart Auto-Rotate or the
   // blue pulse. Fresh player activity is required to resume animation.
-  if (flipAnimationActive) {
+  if (cameraAnimationActive()) {
     startContinuousRendering();
   }
 });
@@ -683,6 +735,9 @@ let moveSequenceHistory = [];
 let undoHistory = [];
 let redoHistory = [];
 let historyReviewActive = false;
+// 2.0.9: Bot vs Bot rewind (view-only). null when showing the live game.
+// { index, total, sessionId, live: {...}, moveCells: [[x,y,z]|null, ...] }
+let rewindState = null;
 
 // bot plumbing repairs. The bot may enter playMove() through
 // the internal bot-move path while human input remains blocked during bot turns.
@@ -708,6 +763,43 @@ let botWorker = null;
 let botWorkerBlobUrl = null;
 let botSearchRequestId = 0;
 let botGameSessionId = 0;
+
+// 2.0: Bot vs Bot. Each color has its own difficulty and thinking time.
+// Moves are placed at least BOT_VS_BOT_MIN_MOVE_GAP_MS after the previous
+// move was placed, measured from the moment it landed on the board, even when
+// the Bot finishes thinking sooner. A pass message stays up briefly and then
+// dismisses itself so the game keeps going without input.
+// 2.0.1: moves are 2 seconds apart (was 1 s) so the slower turn-to-move
+// animation is easy to follow; both Bots default to 1.0 s thinking time.
+// 2.0.2: moves are 3 seconds apart (was 2 s). Bots are still limited to the
+// thinking time entered by the user; the extra time is waiting only.
+const BOT_VS_BOT_MIN_MOVE_GAP_MS = 3000;
+const BOT_VS_BOT_PASS_DISPLAY_MS = 1500;
+// 2.0.5: each Bot defaults to its own level's thinking time
+// (BOT_THINKING_TIME_DEFAULTS: Easy 0.1 s, Medium 0.7 s, Hard 1.1 s); the
+// 2.0.1 rule that both Bots default to 1.0 s is gone.
+const BOT_VS_BOT_NEXT_GAME_SECONDS = 15;
+// 2.0.5: the two Bots of a session are Bot A (the one set up in the Black Bot
+// panel) and Bot B (the White Bot panel). Colours alternate every game: Bot A
+// plays Black in games 1, 3, 5, ... and White in games 2, 4, 6, ...
+// botVsBotSettings maps the colours of the current game to the two Bots.
+let botVsBotBots = {
+  A: { difficulty: 'hard', thinkingTimeMs: 1100 },
+  B: { difficulty: 'hard', thinkingTimeMs: 1100 }
+};
+let botVsBotGameIndex = 0; // 0-based game number within the session
+let botVsBotSettings = { [BLACK]: botVsBotBots.A, [WHITE]: botVsBotBots.B };
+// 2.0.1: running tally for the current Bot vs Bot session (reset whenever a
+// Bot vs Bot session is started from the Start Menu, i.e. whenever the board
+// size or Bot settings can change) and the auto next-game countdown.
+// 2.0.5: counted by Bot (A / B), not by colour, because colours alternate.
+let botVsBotTally = { games: 0, a: 0, b: 0, draws: 0 };
+let botVsBotGameCounted = false;
+let botVsBotCountdown = null; // { remaining, timer, paused, stopped }
+let botVsBotPaused = false;
+let botVsBotLastMoveAt = 0;
+let botVsBotMoveDelayTimer = null;
+let botVsBotPassTimer = null;
 
 function key(x, y, z) {
   return `${x},${y},${z}`;
@@ -830,8 +922,509 @@ function countOpponentMovesAfterMove(move, player, flips) {
 }
 
 function isBotTurn() {
-  return opponentMode === 'bot' && currentPlayer !== humanPlayer && !gameCompleteActive && !historyReviewActive;
+  if (gameCompleteActive || historyReviewActive || rewindState) return false;
+  // 2.0: in Bot vs Bot every turn is a Bot turn unless the match is paused.
+  if (opponentMode === 'botvsbot') return !botVsBotPaused;
+  return opponentMode === 'bot' && currentPlayer !== humanPlayer;
 }
+
+function capitalizeDifficulty(value) {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+// 2.0: difficulty / thinking time for the Bot whose turn it is.
+function currentBotDifficulty() {
+  return opponentMode === 'botvsbot' ? botVsBotSettings[currentPlayer].difficulty : botDifficulty;
+}
+
+function currentBotThinkingTimeMs() {
+  return opponentMode === 'botvsbot' ? botVsBotSettings[currentPlayer].thinkingTimeMs : getConfiguredBotThinkingTimeMs();
+}
+
+function clearBotVsBotTimers() {
+  if (botVsBotMoveDelayTimer !== null) { clearTimeout(botVsBotMoveDelayTimer); botVsBotMoveDelayTimer = null; }
+  if (botVsBotPassTimer !== null) { clearTimeout(botVsBotPassTimer); botVsBotPassTimer = null; }
+}
+
+// Commit a Bot's chosen move. Human-vs-Bot plays it at once (unchanged);
+// Bot vs Bot waits until at least 3 seconds have passed since the last move
+// (2.0.2; was 2 s in 2.0.1 and 1 s in 2.0). A Bot that thinks longer than that adds no extra wait.
+function commitBotMove(move) {
+  if (opponentMode !== 'botvsbot') {
+    hideBotThinkingIndicator();
+    playMove(move[0], move[1], move[2], true);
+    return;
+  }
+  const sessionId = botGameSessionId;
+  const player = currentPlayer;
+  const place = () => {
+    botVsBotMoveDelayTimer = null;
+    hideBotThinkingIndicator();
+    if (sessionId !== botGameSessionId || !isBotTurn() || passMessageActive || currentPlayer !== player) return;
+    playMove(move[0], move[1], move[2], true);
+  };
+  const waitMs = Math.max(0, BOT_VS_BOT_MIN_MOVE_GAP_MS - (performance.now() - botVsBotLastMoveAt));
+  if (waitMs <= 0) place();
+  else botVsBotMoveDelayTimer = setTimeout(place, waitMs);
+}
+
+function armBotVsBotPassTimer() {
+  if (botVsBotPassTimer !== null) { clearTimeout(botVsBotPassTimer); botVsBotPassTimer = null; }
+  if (opponentMode !== 'botvsbot' || botVsBotPaused) return;
+  const sessionId = botGameSessionId;
+  botVsBotPassTimer = setTimeout(() => {
+    botVsBotPassTimer = null;
+    if (sessionId !== botGameSessionId || opponentMode !== 'botvsbot' || botVsBotPaused) return;
+    if (passMessageActive && passPlayer !== null && !gameCompleteActive) dismissPassMessage();
+  }, BOT_VS_BOT_PASS_DISPLAY_MS);
+}
+
+function updateBotVsBotPauseButton() {
+  const isBotVsBot = opponentMode === 'botvsbot';
+  const countdownRunning = isBotVsBot && gameCompleteActive && botVsBotCountdown !== null && !botVsBotCountdown.stopped;
+  const paused = countdownRunning ? botVsBotCountdown.paused : botVsBotPaused;
+  resignButton.hidden = isBotVsBot;
+  botVsBotPauseButton.hidden = !isBotVsBot;
+  // 2.0.1: Pause also holds the next-game countdown after a game completes.
+  botVsBotPauseButton.disabled = !isBotVsBot || (gameCompleteActive && !countdownRunning);
+  botVsBotPauseButton.textContent = paused ? 'Resume' : 'Pause';
+  botVsBotPauseButton.setAttribute('aria-pressed', paused ? 'true' : 'false');
+  // 2.0.4: keep the on-board button in step with the panel button.
+  if (boardPauseButton) {
+    boardPauseButton.hidden = !isBotVsBot;
+    boardPauseButton.disabled = botVsBotPauseButton.disabled;
+    boardPauseButton.classList.toggle('paused', paused);
+    boardPauseButton.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    boardPauseButton.setAttribute('aria-label', paused ? 'Resume Bot vs Bot' : 'Pause Bot vs Bot');
+    boardPauseButton.title = paused ? 'Resume' : 'Pause';
+  }
+  if (sceneElement && sceneElement.parentElement) {
+    sceneElement.parentElement.classList.toggle('bot-vs-bot-active', isBotVsBot);
+  }
+  if (botVsBotStopButton) botVsBotStopButton.hidden = !countdownRunning;
+}
+
+// 2.0.1: Bot vs Bot auto next game. After Game Complete a 15-second
+// countdown runs, then a new game starts with the same settings. Pause holds
+// it, Stop cancels it, New Game / Start Menu / Load Sequence cancel it.
+function botVsBotCountdownText() {
+  if (!botVsBotCountdown) return '';
+  if (botVsBotCountdown.stopped) return 'Auto next game stopped';
+  if (botVsBotCountdown.paused) return `Next game paused (${botVsBotCountdown.remaining}s)`;
+  return `Next game in ${botVsBotCountdown.remaining}…`;
+}
+
+function renderBotVsBotCountdown() {
+  if (botVsBotCountdownLabel) {
+    const text = botVsBotCountdownText();
+    botVsBotCountdownLabel.textContent = text;
+    botVsBotCountdownLabel.hidden = !text || opponentMode !== 'botvsbot' || !!rewindState;
+  }
+  if (gameCompleteActive && passOverlay.classList.contains('visible') && botVsBotResultText) {
+    const text = botVsBotCountdownText();
+    passMessage.textContent = text ? `${botVsBotResultText}\n${text}` : botVsBotResultText;
+  }
+  updateBotVsBotPauseButton();
+}
+
+let botVsBotResultText = '';
+
+function clearBotVsBotCountdownTimer() {
+  if (botVsBotCountdown && botVsBotCountdown.timer !== null) {
+    clearTimeout(botVsBotCountdown.timer);
+    botVsBotCountdown.timer = null;
+  }
+}
+
+function cancelBotVsBotCountdown() {
+  clearBotVsBotCountdownTimer();
+  botVsBotCountdown = null;
+  botVsBotResultText = '';
+  if (botVsBotCountdownLabel) { botVsBotCountdownLabel.textContent = ''; botVsBotCountdownLabel.hidden = true; }
+  if (botVsBotStopButton) botVsBotStopButton.hidden = true;
+}
+
+function tickBotVsBotCountdown() {
+  const countdown = botVsBotCountdown;
+  if (!countdown) return;
+  countdown.timer = null;
+  if (countdown.paused || countdown.stopped) return;
+  if (countdown.sessionId !== botGameSessionId || opponentMode !== 'botvsbot' || !gameCompleteActive) {
+    cancelBotVsBotCountdown();
+    return;
+  }
+  countdown.remaining -= 1;
+  if (countdown.remaining <= 0) {
+    cancelBotVsBotCountdown();
+    startNextBotVsBotGame();
+    return;
+  }
+  renderBotVsBotCountdown();
+  countdown.timer = setTimeout(tickBotVsBotCountdown, 1000);
+}
+
+function startBotVsBotCountdown(resultText) {
+  cancelBotVsBotCountdown();
+  botVsBotResultText = resultText;
+  botVsBotCountdown = {
+    remaining: BOT_VS_BOT_NEXT_GAME_SECONDS,
+    timer: null,
+    paused: false,
+    stopped: false,
+    sessionId: botGameSessionId
+  };
+  // 2.0.9: a game that ends while the user is rewinding holds its countdown
+  // until they return to Live.
+  if (rewindState) {
+    botVsBotCountdown.paused = true;
+    rewindState.pausedCountdown = true;
+    if (passOverlay.classList.contains('visible')) {
+      rewindState.live.overlayVisible = true;
+      passOverlay.classList.remove('visible');
+    }
+    renderBotVsBotCountdown();
+    return;
+  }
+  renderBotVsBotCountdown();
+  botVsBotCountdown.timer = setTimeout(tickBotVsBotCountdown, 1000);
+}
+
+function toggleBotVsBotCountdownPause() {
+  const countdown = botVsBotCountdown;
+  if (!countdown || countdown.stopped) return;
+  countdown.paused = !countdown.paused;
+  clearBotVsBotCountdownTimer();
+  if (!countdown.paused) countdown.timer = setTimeout(tickBotVsBotCountdown, 1000);
+  renderBotVsBotCountdown();
+  applyBotVsBotViewHold();
+  updateStatus();
+}
+
+// 2.0.4: while Bot vs Bot is paused (a game in progress, or the next-game
+// countdown held) the cube holds still so it can be inspected: Auto-Rotate
+// and any turn-to-face animation stop, and drag / rotate / zoom stay free.
+// Resume restarts Auto-Rotate (if it is switched on) and the move pacing.
+function botVsBotViewHeld() {
+  if (opponentMode !== 'botvsbot') return false;
+  if (gameCompleteActive) {
+    return !!(botVsBotCountdown && !botVsBotCountdown.stopped && botVsBotCountdown.paused);
+  }
+  return botVsBotPaused;
+}
+
+function applyBotVsBotViewHold() {
+  if (botVsBotViewHeld()) {
+    faceTurnAnimation = null;
+    requestRender();
+  } else {
+    keepBotVsBotAutoRotating();
+  }
+}
+
+function stopBotVsBotCountdown() {
+  const countdown = botVsBotCountdown;
+  if (!countdown || countdown.stopped) return;
+  clearBotVsBotCountdownTimer();
+  countdown.stopped = true;
+  countdown.paused = false;
+  renderBotVsBotCountdown();
+  updateStatus();
+}
+
+// Start the next game of the session with the same board size and Bot
+// settings. The tally carries over.
+function startNextBotVsBotGame() {
+  if (opponentMode !== 'botvsbot') return;
+  // 2.0.5: the Bots swap colours for every new game of the session.
+  botVsBotGameIndex++;
+  assignBotVsBotColours();
+  gameInProgress = true;
+  resetBoardForNewGame();
+  initializeGameClock();
+  createBotWorker();
+  botVsBotPaused = false;
+  botVsBotLastMoveAt = performance.now();
+  keepBotVsBotAutoRotating();
+  updateStatus();
+  scheduleBotTurn();
+}
+
+function recordBotVsBotResult(black, white) {
+  if (opponentMode !== 'botvsbot' || botVsBotGameCounted) return;
+  botVsBotGameCounted = true;
+  botVsBotTally.games++;
+  const blackKey = botVsBotBlackKey();
+  const whiteKey = blackKey === 'A' ? 'B' : 'A';
+  if (black > white) botVsBotTally[blackKey.toLowerCase()]++;
+  else if (white > black) botVsBotTally[whiteKey.toLowerCase()]++;
+  else botVsBotTally.draws++;
+  // 2.0.7: keep each finished game's per-Bot Bot Summary totals for the
+  // across-games section (only when the Bot Summary is on).
+  if (developerMode) {
+    try {
+      const entries = summaryActiveEntries();
+      botVsBotSummaryGames.push({
+        game: botVsBotGameIndex + 1,
+        blackKey,
+        black,
+        white,
+        winner: black > white ? blackKey : (white > black ? whiteKey : null),
+        perBot: { A: botVsBotBotTotals(entries, 'A'), B: botVsBotBotTotals(entries, 'B') }
+      });
+    } catch (error) {
+      console.error('Bot Summary session error:', error);
+    }
+  }
+  updateBotDeveloperPanel();
+}
+
+// 2.0.5: Bot A plays Black in odd-numbered games (1, 3, ...), Bot B in even.
+function botVsBotBlackKey() {
+  return botVsBotGameIndex % 2 === 0 ? 'A' : 'B';
+}
+
+function assignBotVsBotColours() {
+  const blackKey = botVsBotBlackKey();
+  const whiteKey = blackKey === 'A' ? 'B' : 'A';
+  botVsBotSettings = { [BLACK]: botVsBotBots[blackKey], [WHITE]: botVsBotBots[whiteKey] };
+}
+
+// 2.0.5: the Bots are named Bot 1 (A, set up in the first panel, Black in
+// game 1) and Bot 2 (B). Each keeps its own level and thinking time, shown as
+// e.g. "Bot 1 (Hard 1.1s)"; short=true abbreviates Medium for phones.
+function botVsBotDescribe(bot, number, short = false) {
+  const level = short && bot.difficulty === 'medium' ? 'Med' : capitalizeDifficulty(bot.difficulty);
+  return `Bot ${number} (${level} ${(bot.thinkingTimeMs / 1000).toFixed(1)}s)`;
+}
+
+function botVsBotName(key, short = false) {
+  return botVsBotDescribe(botVsBotBots[key], key === 'A' ? 1 : 2, short);
+}
+
+function botVsBotKeyFor(player) {
+  const blackKey = botVsBotBlackKey();
+  return player === BLACK ? blackKey : (blackKey === 'A' ? 'B' : 'A');
+}
+
+function botVsBotTallyText() {
+  const t = botVsBotTally;
+  return `Games ${t.games} · Bot 1 ${t.a}, Bot 2 ${t.b}, Draws ${t.draws}`;
+}
+
+// 2.0.2: compact phone version of the tally (shown by CSS at max-width 760px).
+function botVsBotTallyShortText() {
+  const t = botVsBotTally;
+  return `Bot 1 ${t.a}, Bot 2 ${t.b}, Draws ${t.draws}`;
+}
+
+// 2.0.2: fill a header label with a full (desktop) and a short (phone) form.
+// CSS shows exactly one of them, so the desktop text is unchanged.
+function setLongShortLabel(element, longText, shortText) {
+  const longSpan = document.createElement('span');
+  longSpan.className = 'hud-long';
+  longSpan.textContent = longText;
+  const shortSpan = document.createElement('span');
+  shortSpan.className = 'hud-short';
+  shortSpan.textContent = shortText;
+  element.replaceChildren(longSpan, shortSpan);
+}
+
+function toggleBotVsBotPause() {
+  if (opponentMode !== 'botvsbot') return;
+  // 2.0.9: Pause/Resume while rewinding returns to the live position and resumes.
+  if (rewindState) { exitRewind(true); return; }
+  if (gameCompleteActive) {
+    if (botVsBotCountdown && !botVsBotCountdown.stopped) toggleBotVsBotCountdownPause();
+    return;
+  }
+  botVsBotPaused = !botVsBotPaused;
+  applyBotVsBotViewHold();
+  if (botVsBotPaused) {
+    // Stop cleanly: drop any pending search, delayed move or pass timer.
+    if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+    clearBotVsBotTimers();
+    cancelBotSearch();
+    hideBotThinkingIndicator();
+    stopGameClock();
+  } else {
+    botVsBotLastMoveAt = performance.now();
+    keepBotVsBotAutoRotating();
+    if (passMessageActive && passPlayer !== null && !gameCompleteActive) armBotVsBotPassTimer();
+    else scheduleBotTurn();
+  }
+  updateStatus();
+}
+
+// 2.0.9: Bot vs Bot rewind. A view-only look back through the current game:
+// entering rewind pauses the Bots (or holds the next-game countdown), Back /
+// Forward step through the recorded positions, and Live (or Resume) puts the
+// real position back and lets play continue. Nothing is branched or replayed:
+// only the board shown, the counts, the markers and the camera change.
+// undoHistory[k] is the position after k discs were placed, so a game with
+// M placed discs has positions 0..M (M = the live position).
+function rewindMoveLabel() {
+  return rewindState ? `Move ${rewindState.index} of ${rewindState.total}` : '';
+}
+
+function rewindCanStart() {
+  return opponentMode === 'botvsbot'
+    && undoHistory.length > 0
+    && !startOverlay.classList.contains('visible');
+}
+
+function enterRewind() {
+  if (rewindState) return true;
+  if (!rewindCanStart()) return false;
+  if (gameCompleteActive) {
+    if (botVsBotCountdown && !botVsBotCountdown.stopped && !botVsBotCountdown.paused) {
+      toggleBotVsBotCountdownPause();
+    }
+  } else if (!botVsBotPaused) {
+    toggleBotVsBotPause();
+  }
+  const liveBoard = board.map((layer) => layer.map((row) => row.slice()));
+  const total = undoHistory.length;
+  // The cell placed by move k (1..M): the one cell empty before and filled after.
+  const moveCells = [];
+  for (let k = 1; k <= total; k++) {
+    const before = undoHistory[k - 1].board;
+    const after = k < total ? undoHistory[k].board : liveBoard;
+    let cell = null;
+    for (let x = 0; x < SIZE && !cell; x++) {
+      for (let y = 0; y < SIZE && !cell; y++) {
+        for (let z = 0; z < BOARD_DEPTH; z++) {
+          if (before[x][y][z] === EMPTY && after[x][y][z] !== EMPTY) { cell = [x, y, z]; break; }
+        }
+      }
+    }
+    moveCells.push(cell);
+  }
+  rewindState = {
+    index: total,
+    total,
+    sessionId: botGameSessionId,
+    moveCells,
+    live: {
+      board: liveBoard,
+      currentPlayer,
+      lastMoveMarkerKey,
+      overlayVisible: passOverlay.classList.contains('visible')
+    }
+  };
+  passOverlay.classList.remove('visible');
+  hideBotThinkingIndicator();
+  // The countdown was paused above before rewindState existed; re-render so
+  // its header text is hidden while rewinding (it holds until Live).
+  renderBotVsBotCountdown();
+  return true;
+}
+
+function showRewindPosition(index, turnCamera = true) {
+  const state = rewindState;
+  if (!state) return;
+  state.index = Math.max(0, Math.min(state.total, index));
+  const snapshot = state.index < state.total ? undoHistory[state.index] : state.live;
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
+        board[x][y][z] = snapshot.board[x][y][z];
+      }
+    }
+  }
+  currentPlayer = snapshot.currentPlayer;
+  lastMoveMarkerKey = snapshot.lastMoveMarkerKey;
+  highlightedLegalKey = null;
+  updateLastMoveMarker();
+  updatePieces();
+  updateOccupiedSurface();
+  updateLegalCells();
+  updateStatus();
+  const cell = state.index > 0 ? state.moveCells[state.index - 1] : null;
+  if (turnCamera && cell) rotateViewToMove(cell[0], cell[1], cell[2], FACE_TURN_DURATION);
+  requestRender();
+}
+
+function rewindStep(delta) {
+  if (opponentMode !== 'botvsbot') return;
+  if (rewindState && rewindState.sessionId !== botGameSessionId) rewindState = null;
+  if (!rewindState) {
+    if (delta >= 0) return; // nothing ahead of the live position
+    if (!enterRewind()) return;
+  }
+  const next = Math.max(0, Math.min(rewindState.total, rewindState.index + delta));
+  if (next === rewindState.index) { updateStatus(); return; }
+  showRewindPosition(next);
+}
+
+// Return to the live position. resume=true continues play (Live / Resume);
+// resume=false only restores the board (Start Menu).
+function exitRewind(resume = true) {
+  const state = rewindState;
+  if (!state) return;
+  if (state.sessionId === botGameSessionId) {
+    showRewindPosition(state.total, false);
+    if (state.live.overlayVisible) passOverlay.classList.add('visible');
+  }
+  rewindState = null;
+  renderBotVsBotCountdown();
+  if (resume && opponentMode === 'botvsbot' && state.sessionId === botGameSessionId) {
+    const cell = state.total > 0 ? state.moveCells[state.total - 1] : null;
+    if (cell) rotateViewToMove(cell[0], cell[1], cell[2], FACE_TURN_DURATION);
+    if (gameCompleteActive) {
+      if (botVsBotCountdown && !botVsBotCountdown.stopped && botVsBotCountdown.paused) toggleBotVsBotCountdownPause();
+    } else if (botVsBotPaused) {
+      toggleBotVsBotPause();
+    }
+  }
+  updateStatus();
+}
+
+function rewindGoLive() {
+  if (rewindState) exitRewind(true);
+}
+
+function updateRewindControls() {
+  const isBotVsBot = opponentMode === 'botvsbot';
+  const active = !!rewindState;
+  const canBack = active ? rewindState.index > 0 : rewindCanStart();
+  const canForward = active && rewindState.index < rewindState.total;
+  // Human games keep Undo / Redo unchanged; Bot vs Bot shows the rewind row.
+  undoButton.hidden = isBotVsBot;
+  redoButton.hidden = isBotVsBot;
+  for (const [button, enabled] of [
+    [rewindBackButton, canBack],
+    [rewindForwardButton, canForward],
+    [rewindLiveButton, active],
+    [boardRewindBackButton, canBack],
+    [boardRewindForwardButton, canForward],
+    [boardRewindLiveButton, active]
+  ]) {
+    if (!button) continue;
+    button.hidden = !isBotVsBot;
+    button.disabled = !isBotVsBot || !enabled;
+  }
+  if (boardRewindButton) {
+    boardRewindButton.hidden = !isBotVsBot || active;
+    boardRewindButton.disabled = !canBack;
+  }
+  if (boardRewindBar) boardRewindBar.hidden = !isBotVsBot || !active;
+  if (boardRewindLabel) boardRewindLabel.textContent = rewindMoveLabel();
+  if (sceneElement && sceneElement.parentElement) {
+    sceneElement.parentElement.classList.toggle('rewind-active', isBotVsBot && active);
+  }
+}
+
+// Keep Auto-Rotate alive during Bot vs Bot. Each Bot move counts as activity
+// for the 60-second inactivity timeout, so the cube keeps turning while the
+// Bots play, at the normal Auto-Rotate speed.
+function keepBotVsBotAutoRotating() {
+  if (opponentMode !== 'botvsbot' || !autoRotateEnabled || botVsBotViewHeld()) return;
+  autoRotateLastActivityTime = performance.now();
+  autoRotateAnimationActive = true;
+  armAutoRotateStopTimer();
+  startContinuousRendering();
+}
+
 
 function getSurfaceLevel(move) {
   let level = 0;
@@ -872,41 +1465,331 @@ function getCornerPosition(move, player) {
   return best;
 }
 
+// -----------------------------------------------------------------------------
+// 1.35.1: Bot Summary — per-move book / eval / corner data, header and totals,
+// and the "Copy for dub" machine-readable export. Everything here is computed
+// in the controller from the board and the engine's existing search stats; the
+// engine itself is unchanged.
+// -----------------------------------------------------------------------------
+const SUMMARY_VERSION = '2.0.9';
+const SUMMARY_TERMINAL_SCORE = 999000;
+
+function summaryIsCorner(x, y, z) {
+  const edgeX = x === 0 || x === SIZE - 1;
+  const edgeY = y === 0 || y === SIZE - 1;
+  const edgeZ = BOARD_DEPTH === 1 ? true : (z === 0 || z === BOARD_DEPTH - 1);
+  return edgeX && edgeY && edgeZ;
+}
+
+function summaryToken(coordinate) {
+  return String(coordinate || '').replace(/\s+/g, '');
+}
+
+function summaryCountEmpties() {
+  let empties = 0;
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
+        if (board[x][y][z] === EMPTY) empties++;
+      }
+    }
+  }
+  return empties;
+}
+
+// Eval of the move the Bot actually played, from the Bot's own point of view.
+//   kind 'search'   heuristic root score of the chosen move (engine units)
+//   kind 'book'     cube opening-book score of the chosen move (engine units)
+//   kind 'exact'    exact endgame solve: final disc difference
+//   kind 'win'/'loss' search proved a won/lost ending: final disc difference
+//   kind ''         no eval (Classic book move or forced single move)
+function summaryEvalForMove(move, stats) {
+  const source = stats.source || 'SEARCH';
+  if (source === 'BOOK') {
+    if (typeof stats.bookScore === 'number') return { evalScore: stats.bookScore, evalKind: 'book' };
+    return { evalScore: null, evalKind: '' };
+  }
+  if (source === 'FORCED') return { evalScore: null, evalKind: '' };
+  const token = summaryToken(coordinateNotation(move[0], move[1], move[2]));
+  const candidates = Array.isArray(stats.rootCandidateScores) ? stats.rootCandidateScores : [];
+  const chosen = candidates.find((candidate) =>
+    candidate && Array.isArray(candidate.move) &&
+    summaryToken(coordinateNotation(candidate.move[0], candidate.move[1], candidate.move[2])) === token
+  );
+  let score = chosen && Number.isFinite(chosen.score) ? chosen.score : null;
+  if (score === null && stats.exactSolve && Number.isFinite(stats.solvedDiscDiff)) {
+    return { evalScore: stats.solvedDiscDiff, evalKind: 'exact' };
+  }
+  if (score === null) return { evalScore: null, evalKind: '' };
+  if (Math.abs(score) >= SUMMARY_TERMINAL_SCORE) {
+    const discs = Math.round((Math.abs(score) - 1000000) / 1000) * Math.sign(score);
+    const kind = stats.exactSolve ? 'exact' : (score > 0 ? 'win' : 'loss');
+    return { evalScore: discs, evalKind: kind };
+  }
+  return { evalScore: score, evalKind: 'search' };
+}
+
+// Corner facts for one Bot move, measured on the live board before the move
+// is played (the board is restored afterwards).
+//   cornerAvailable  at least one corner was a legal move for the Bot
+//   cornerTaken      the Bot's chosen move was a corner
+//   oppCornersGiven  corners that become legal for the opponent after the move
+//                    and were not legal for the opponent before it
+function summaryCornerAnalysis(move, player) {
+  const own = legalMoves(player);
+  const cornerMoves = own.filter((m) => summaryIsCorner(m[0], m[1], m[2]));
+  const other = opponent(player);
+  const key = (m) => `${m[0]},${m[1]},${m[2]}`;
+  const before = new Set(legalMoves(other).filter((m) => summaryIsCorner(m[0], m[1], m[2])).map(key));
+  const savedBoard = board.map((plane) => plane.map((row) => row.slice()));
+  const flips = getFlips(move[0], move[1], move[2], player);
+  board[move[0]][move[1]][move[2]] = player;
+  for (const [x, y, z] of flips) board[x][y][z] = player;
+  const after = legalMoves(other).filter((m) => summaryIsCorner(m[0], m[1], m[2]));
+  board = savedBoard;
+  const given = after.filter((m) => !before.has(key(m)))
+    .map((m) => summaryToken(coordinateNotation(m[0], m[1], m[2])));
+  return {
+    cornerAvailable: cornerMoves.length > 0,
+    cornerMovesAvailable: cornerMoves.map((m) => summaryToken(coordinateNotation(m[0], m[1], m[2]))),
+    cornerTaken: summaryIsCorner(move[0], move[1], move[2]),
+    oppCornersGiven: given
+  };
+}
+
+function analyzeBotMoveForSummary(move, player, stats) {
+  try {
+    return {
+      emptiesBefore: summaryCountEmpties(),
+      bookScore: typeof stats.bookScore === 'number' ? stats.bookScore : null,
+      ...summaryEvalForMove(move, stats),
+      ...summaryCornerAnalysis(move, player)
+    };
+  } catch (error) {
+    console.error('Bot Summary analysis error:', error);
+    return {};
+  }
+}
+
+// Bot entries that still match the game record (moves taken back by Undo are
+// dropped, so the summary always describes the game on the board).
+function summaryActiveEntries() {
+  // Undo leaves old entries in botDeveloperEntries. Keep only the most recent
+  // entry for each move number, and only if it still matches the move list,
+  // so moves taken back (and replayed) are counted once.
+  const latest = new Map();
+  for (const entry of botDeveloperEntries) latest.set(entry.moveNumber, entry);
+  return [...latest.values()]
+    .filter((entry) =>
+      entry.moveNumber <= moveSequenceHistory.length &&
+      summaryToken(moveSequenceHistory[entry.moveNumber - 1]) === summaryToken(entry.coordinate))
+    .sort((a, b) => a.moveNumber - b.moveNumber);
+}
+
+function summaryColorsForHistory() {
+  // PASS is recorded explicitly, so colours alternate strictly from Black.
+  let color = BLACK;
+  return moveSequenceHistory.map((token) => {
+    if (/^RESIGN-|^TIMEOUT-/.test(token)) {
+      return token.endsWith('BLACK') ? BLACK : WHITE;
+    }
+    const current = color;
+    color = opponent(color);
+    return current;
+  });
+}
+
+function summaryNamedOpeningAt(ply) {
+  try {
+    if (!boardHasOpeningNames()) return '';
+    const history = moveSequenceHistory.slice(0, ply);
+    const found = BOARD_DEPTH === 1 ? getRecognizedClassicOpening(history) : getRecognizedCubeOpening(history);
+    if (!found) return '';
+    return found.variation ? `${found.opening} - ${found.variation}` : found.opening;
+  } catch (error) {
+    return '';
+  }
+}
+
+function summaryScore() {
+  let black = 0;
+  let white = 0;
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
+        if (board[x][y][z] === BLACK) black++;
+        if (board[x][y][z] === WHITE) white++;
+      }
+    }
+  }
+  return { black, white };
+}
+
+function summaryResult(score) {
+  const last = moveSequenceHistory[moveSequenceHistory.length - 1] || '';
+  if (last === 'RESIGN-BLACK') return { code: 'BLACK_RESIGNED', text: 'Black resigned — White wins', complete: true };
+  if (last === 'RESIGN-WHITE') return { code: 'WHITE_RESIGNED', text: 'White resigned — Black wins', complete: true };
+  if (last === 'TIMEOUT-BLACK') return { code: 'BLACK_TIMEOUT', text: 'Black ran out of time — White wins', complete: true };
+  if (last === 'TIMEOUT-WHITE') return { code: 'WHITE_TIMEOUT', text: 'White ran out of time — Black wins', complete: true };
+  if (gameCompleteActive) {
+    if (score.black > score.white) return { code: 'BLACK_WIN', text: 'Game complete — Black wins', complete: true };
+    if (score.white > score.black) return { code: 'WHITE_WIN', text: 'Game complete — White wins', complete: true };
+    return { code: 'DRAW', text: 'Game complete — Draw', complete: true };
+  }
+  return { code: 'IN_PROGRESS', text: 'In progress', complete: false };
+}
+
+function summaryThinkingSetting() {
+  const ms = getConfiguredBotThinkingTimeMs();
+  let defaultMs = null;
+  try { defaultMs = (BOT_THINKING_TIME_DEFAULTS[botDifficulty] ?? null) * 1000; } catch (error) { defaultMs = null; }
+  const isDefault = ms !== null && defaultMs !== null && Math.abs(ms - defaultMs) < 1;
+  return { ms, isDefault, text: ms === null ? 'not set' : `${(ms / 1000).toFixed(1)} s (${isDefault ? 'default' : 'custom'})` };
+}
+
+function summaryFormatEval(entry) {
+  if (entry.evalScore == null || !entry.evalKind) return '';
+  const signed = (value, digits) => `${value > 0 ? '+' : ''}${Number(value).toFixed(digits)}`;
+  if (entry.evalKind === 'exact') return `${signed(entry.evalScore, 0)} discs (exact)`;
+  if (entry.evalKind === 'win') return `${signed(entry.evalScore, 0)} discs (won ending)`;
+  if (entry.evalKind === 'loss') return `${signed(entry.evalScore, 0)} discs (lost ending)`;
+  if (entry.evalKind === 'book') return `${signed(entry.evalScore, 1)} (book)`;
+  return signed(entry.evalScore, 1);
+}
+
+function summaryComputeStats(entries) {
+  const searchKinds = new Set(['search', 'book']);
+  let biggestSwing = null;
+  let previous = null;
+  for (const entry of entries) {
+    if (entry.evalScore == null || !searchKinds.has(entry.evalKind)) { continue; }
+    if (previous) {
+      const delta = entry.evalScore - previous.evalScore;
+      if (!biggestSwing || Math.abs(delta) > Math.abs(biggestSwing.delta)) {
+        biggestSwing = { moveNumber: entry.moveNumber, from: previous.moveNumber, delta, coordinate: entry.coordinate, color: entry.color };
+      }
+    }
+    previous = entry;
+  }
+
+  let leftBookAt = null;
+  let seenBook = false;
+  for (const entry of entries) {
+    if (entry.source === 'BOOK') { seenBook = true; continue; }
+    if (seenBook) { leftBookAt = entry.moveNumber; break; }
+  }
+
+  const searched = entries.filter((entry) => entry.source !== 'BOOK' && entry.source !== 'FORCED');
+  const totalMs = entries.reduce((sum, entry) => sum + (entry.timeMs || 0), 0);
+  const longest = entries.reduce((best, entry) => (!best || entry.timeMs > best.timeMs ? entry : best), null);
+  const searchedMs = searched.reduce((sum, entry) => sum + (entry.timeMs || 0), 0);
+  const searchedNodes = searched.reduce((sum, entry) => sum + (entry.nodes || 0), 0);
+  const solveEntry = entries.find((entry) => entry.exactSolve) ||
+    (BOARD_DEPTH === 1 ? entries.find((entry) => entry.source !== 'BOOK' && entry.emptiesBefore != null && entry.depth >= entry.emptiesBefore && entry.depth > 0) : null);
+
+  return {
+    botMoves: entries.length,
+    bookMoves: entries.filter((entry) => entry.source === 'BOOK').length,
+    leftBookAt,
+    totalMs,
+    averageMs: entries.length ? totalMs / entries.length : 0,
+    longest,
+    searchedMoves: searched.length,
+    averageDepth: searched.length ? searched.reduce((sum, entry) => sum + (entry.depth || 0), 0) / searched.length : 0,
+    nodesPerSecond: searchedMs > 0 ? Math.round((searchedNodes * 1000) / searchedMs) : 0,
+    solveEntry,
+    solveKind: solveEntry ? (solveEntry.exactSolve ? 'exact solve' : 'full-depth search') : '',
+    cornersAvailable: entries.filter((entry) => entry.cornerAvailable).length,
+    cornersTaken: entries.filter((entry) => entry.cornerAvailable && entry.cornerTaken).length,
+    cornerMovesTotal: entries.filter((entry) => entry.cornerTaken).length,
+    cornersConcededMoves: entries.filter((entry) => entry.oppCornersGiven?.length).length,
+    cornersConcededTotal: entries.reduce((sum, entry) => sum + (entry.oppCornersGiven?.length || 0), 0),
+    biggestSwing
+  };
+}
+
+function summaryHeaderInfo() {
+  const score = summaryScore();
+  const result = summaryResult(score);
+  const thinking = summaryThinkingSetting();
+  const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
+  const boardCode = BOARD_DEPTH === 1 ? 'classic' : `${SIZE}x${SIZE}x${BOARD_DEPTH}`;
+  const botColor = humanPlayer === BLACK ? 'White' : 'Black';
+  return { score, result, thinking, boardLabel, boardCode, botColor };
+}
+
 function updateBotDeveloperPanel() {
   if (!botDeveloperPanel || !botDeveloperOutput) return;
-  botDeveloperPanel.hidden = !developerMode || opponentMode !== 'bot';
-  if (!developerMode || opponentMode !== 'bot') return;
+  const summaryMode = opponentMode === 'bot' || opponentMode === 'botvsbot';
+  botDeveloperPanel.hidden = !developerMode || !summaryMode;
+  if (!developerMode || !summaryMode) return;
+  if (opponentMode === 'botvsbot') {
+    updateBotVsBotDeveloperPanel();
+    return;
+  }
 
-  const boardLabel = BOARD_DEPTH === 1 ? '8×8×1 Classic' : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
+  const info = summaryHeaderInfo();
+  const entries = summaryActiveEntries();
+  const stats = summaryComputeStats(entries);
   const lines = [
     `Cube Reversi Bot Developer Summary`,
-    `Board: ${boardLabel}`,
+    `Version: ${SUMMARY_VERSION}`,
+    `Board: ${info.boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
+    `Thinking time: ${info.thinking.text}`,
+    `Bot colour: ${info.botColor}`,
+    `Score: Black ${info.score.black} · White ${info.score.white} — ${info.result.text}`,
     `Browser: ${navigator.userAgent}`,
-    `Moves recorded: ${botDeveloperEntries.length}`,
+    `Moves recorded: ${entries.length}`,
     ''
   ];
 
-  if (botDeveloperEntries.length) {
-    lines.push('Move | Color | Coordinate | Source | Opening | Time (ms) | Depth | Target | Nodes | Leaves | Cutoffs | TT');
-    for (const entry of botDeveloperEntries) {
+  if (entries.length) {
+    lines.push('Move | Color | Coordinate | Source | Opening | Time (ms) | Depth | Target | Nodes | Leaves | Cutoffs | TT | Budget (ms) | Empties | Exact | Book | Named opening | Eval | Corner avail | Corner taken | Opp corner | Note');
+    for (const entry of entries) {
       const source = entry.source || 'SEARCH';
       const opening = entry.bookName || '';
-      lines.push(`${entry.moveNumber} | ${entry.color} | ${entry.coordinate} | ${source} | ${opening} | ${entry.timeMs} | ${entry.depth} | ${entry.targetDepth} | ${entry.nodes} | ${entry.leaves} | ${entry.cutoffs} | ${entry.tableEntries}`);
+      const budget = entry.timeBudgetMs != null ? Math.round(entry.timeBudgetMs) : '';
+      const empties = entry.empties != null ? entry.empties : '';
+      const exact = entry.exactSolve
+        ? `YES (${entry.solvedDiscDiff > 0 ? '+' : ''}${entry.solvedDiscDiff})`
+        : '';
+      const book = source === 'BOOK' ? 'YES' : 'no';
+      const named = summaryNamedOpeningAt(entry.moveNumber);
+      const cornerAvail = entry.cornerAvailable == null ? '' : (entry.cornerAvailable ? 'YES' : 'no');
+      const cornerTaken = entry.cornerTaken == null ? '' : (entry.cornerTaken ? 'YES' : 'no');
+      const oppCorner = entry.oppCornersGiven == null ? '' : (entry.oppCornersGiven.length ? `YES (${entry.oppCornersGiven.join(' ')})` : 'no');
+      const notes = [];
+      if (stats.leftBookAt === entry.moveNumber) notes.push('<< LEFT BOOK');
+      if (stats.solveEntry === entry) notes.push(stats.solveKind === 'exact solve' ? 'ENDGAME SOLVE STARTS' : 'FULL-DEPTH SEARCH STARTS');
+      if (stats.biggestSwing && stats.biggestSwing.moveNumber === entry.moveNumber) notes.push('BIGGEST SWING');
+      lines.push(`${entry.moveNumber} | ${entry.color} | ${entry.coordinate} | ${source} | ${opening} | ${entry.timeMs} | ${entry.depth} | ${entry.targetDepth} | ${entry.nodes} | ${entry.leaves} | ${entry.cutoffs} | ${entry.tableEntries} | ${budget} | ${empties} | ${exact} | ${book} | ${named} | ${summaryFormatEval(entry)} | ${cornerAvail} | ${cornerTaken} | ${oppCorner} | ${notes.join('; ')}`);
     }
-    const totalMs = botDeveloperEntries.reduce((sum, entry) => sum + entry.timeMs, 0);
-    const averageMs = totalMs / botDeveloperEntries.length;
-    const averageDepth = botDeveloperEntries.reduce((sum, entry) => sum + entry.depth, 0) / botDeveloperEntries.length;
     lines.push('');
-    lines.push(`Total Bot search time: ${totalMs.toFixed(1)} ms`);
-    lines.push(`Average Bot move time: ${averageMs.toFixed(1)} ms`);
-    lines.push(`Average completed depth: ${averageDepth.toFixed(2)}`);
+    lines.push('Book');
+    lines.push(`  Book moves: ${stats.bookMoves} of ${stats.botMoves}${stats.leftBookAt ? ` — left the book at move ${stats.leftBookAt}` : (stats.bookMoves ? ' — still in book' : '')}`);
+    const finalName = summaryNamedOpeningAt(moveSequenceHistory.length);
+    if (finalName) lines.push(`  Opening reached: ${finalName}`);
+    lines.push('Eval');
+    lines.push(stats.biggestSwing
+      ? `  Biggest swing: move ${stats.biggestSwing.moveNumber} (${stats.biggestSwing.color} ${stats.biggestSwing.coordinate}), ${stats.biggestSwing.delta > 0 ? '+' : ''}${stats.biggestSwing.delta.toFixed(1)} vs the Bot's previous move ${stats.biggestSwing.from}`
+      : '  Biggest swing: n/a (fewer than two heuristic evals)');
+    lines.push('Corners');
+    lines.push(`  Corner available on ${stats.cornersAvailable} Bot moves; taken on ${stats.cornersTaken} of them`);
+    lines.push(`  Gave the opponent a new corner on ${stats.cornersConcededMoves} Bot moves (${stats.cornersConcededTotal} corner${stats.cornersConcededTotal === 1 ? '' : 's'} conceded)`);
+    lines.push('Totals');
+    lines.push(`  Total Bot search time: ${stats.totalMs.toFixed(1)} ms`);
+    lines.push(`  Average Bot move time: ${stats.averageMs.toFixed(1)} ms`);
+    lines.push(`  Longest think: ${stats.longest ? `${stats.longest.timeMs} ms (move ${stats.longest.moveNumber})` : 'n/a'}`);
+    lines.push(`  Average completed depth: ${stats.averageDepth.toFixed(2)} (over ${stats.searchedMoves} searched moves)`);
+    lines.push(`  Nodes/sec: ${stats.nodesPerSecond.toLocaleString('en-US')}`);
+    lines.push(`  Endgame: ${stats.solveEntry ? `${stats.solveKind} began at move ${stats.solveEntry.moveNumber} (${stats.solveEntry.emptiesBefore ?? stats.solveEntry.empties} empties)` : 'no exact solve yet'}`);
 
     // restore the root-candidate diagnostic history from
     // the established corner-access engine.
     // Developer Mode can now show how every legal root move ranked at each
     // completed iterative-deepening depth for every searched Bot move.
-    const searchedEntries = botDeveloperEntries.filter((entry) =>
+    const searchedEntries = entries.filter((entry) =>
       entry.source !== 'BOOK' && entry.rootCandidateScoreHistory?.length
     );
     if (searchedEntries.length) {
@@ -946,7 +1829,7 @@ function updateBotDeveloperPanel() {
         }
       }
     } else {
-      const latest = botDeveloperEntries[botDeveloperEntries.length - 1];
+      const latest = entries[entries.length - 1];
       if (latest?.rootCandidateScores?.length) {
         const rankedCandidates = latest.rootCandidateScores.slice().sort((a, b) => b.score - a.score);
         lines.push('');
@@ -966,6 +1849,314 @@ function updateBotDeveloperPanel() {
     lines.push('No Bot moves recorded yet.');
   }
 
+  botDeveloperOutput.value = lines.join('\n');
+}
+
+// "Copy for dub": fixed plain-text export (format CUBEREVERSI-DUB v1, see
+// NOTES.md). Sections are [HEADER], [SUMMARY], [BOT_MOVES], [MOVES],
+// [SEQUENCE] and [END]; key=value lines and pipe-separated rows only.
+function buildDubExport() {
+  const info = summaryHeaderInfo();
+  const entries = summaryActiveEntries();
+  const stats = summaryComputeStats(entries);
+  const clean = (value) => {
+    const text = String(value ?? '').replace(/[|\r\n]+/g, ' ').trim();
+    return text === '' ? '-' : text;
+  };
+  const colors = summaryColorsForHistory();
+  const isBotVsBot = opponentMode === 'botvsbot';
+  const out = [
+    '#CUBEREVERSI-DUB v1',
+    '[HEADER]',
+    `version=${SUMMARY_VERSION}`,
+    `board=${info.boardCode}`,
+    `size=${SIZE}`,
+    `depth=${BOARD_DEPTH}`,
+    ...(isBotVsBot ? [
+      // 2.0.7: Bot vs Bot header — both Bots and who plays which colour.
+      'mode=botvsbot',
+      `game=${botVsBotGameIndex + 1}`,
+      `bot1=${clean(botVsBotName('A'))}`,
+      `bot2=${clean(botVsBotName('B'))}`,
+      `bot1_difficulty=${botVsBotBots.A.difficulty}`,
+      `bot1_thinking_ms=${botVsBotBots.A.thinkingTimeMs}`,
+      `bot2_difficulty=${botVsBotBots.B.difficulty}`,
+      `bot2_thinking_ms=${botVsBotBots.B.thinkingTimeMs}`,
+      `black_bot=${botVsBotBlackKey() === 'A' ? 'bot1' : 'bot2'}`,
+      `white_bot=${botVsBotBlackKey() === 'A' ? 'bot2' : 'bot1'}`,
+      `session_games=${botVsBotTally.games}`,
+      `session_bot1_wins=${botVsBotTally.a}`,
+      `session_bot2_wins=${botVsBotTally.b}`,
+      `session_draws=${botVsBotTally.draws}`
+    ] : [
+      `difficulty=${botDifficulty}`,
+      `thinking_ms=${info.thinking.ms ?? '-'}`,
+      `thinking_setting=${info.thinking.ms === null ? '-' : (info.thinking.isDefault ? 'default' : 'custom')}`,
+      `bot_color=${info.botColor.toUpperCase()}`,
+      `human_color=${info.botColor === 'White' ? 'BLACK' : 'WHITE'}`
+    ]),
+    `score_black=${info.score.black}`,
+    `score_white=${info.score.white}`,
+    `status=${info.result.complete ? 'complete' : 'in_progress'}`,
+    `result=${info.result.code}`,
+    `plies=${moveSequenceHistory.length}`,
+    '[SUMMARY]',
+    `bot_moves=${stats.botMoves}`,
+    `book_moves=${stats.bookMoves}`,
+    `left_book_at=${stats.leftBookAt ?? '-'}`,
+    `opening=${clean(summaryNamedOpeningAt(moveSequenceHistory.length))}`,
+    `total_think_ms=${stats.totalMs.toFixed(1)}`,
+    `avg_think_ms=${stats.averageMs.toFixed(1)}`,
+    `max_think_ms=${stats.longest ? stats.longest.timeMs : '-'}`,
+    `max_think_move=${stats.longest ? stats.longest.moveNumber : '-'}`,
+    `avg_depth=${stats.averageDepth.toFixed(2)}`,
+    `searched_moves=${stats.searchedMoves}`,
+    `nps=${stats.nodesPerSecond}`,
+    `endgame_solve_from=${stats.solveEntry ? stats.solveEntry.moveNumber : '-'}`,
+    `endgame_solve_kind=${stats.solveEntry ? (stats.solveKind === 'exact solve' ? 'exact' : 'full_depth') : '-'}`,
+    `corner_available_moves=${stats.cornersAvailable}`,
+    `corner_taken_when_available=${stats.cornersTaken}`,
+    `corner_conceded_moves=${stats.cornersConcededMoves}`,
+    `corner_conceded_total=${stats.cornersConcededTotal}`,
+    `biggest_swing_move=${stats.biggestSwing ? stats.biggestSwing.moveNumber : '-'}`,
+    `biggest_swing=${stats.biggestSwing ? stats.biggestSwing.delta.toFixed(1) : '-'}`,
+    '[BOT_MOVES]',
+    'move|color|coord|source|book|opening|book_line|time_ms|depth|target|nodes|empties|eval|eval_kind|corner_avail|corner_taken|opp_corners_given|note' +
+      (isBotVsBot ? '|bot|bot_label|nps|min_depth' : '')
+  ];
+  for (const entry of entries) {
+    const notes = [];
+    if (stats.leftBookAt === entry.moveNumber) notes.push('LEFT_BOOK');
+    if (stats.solveEntry === entry) notes.push('ENDGAME_SOLVE');
+    if (stats.biggestSwing && stats.biggestSwing.moveNumber === entry.moveNumber) notes.push('BIGGEST_SWING');
+    const evalValue = entry.evalScore == null ? '-' : (entry.evalKind === 'search' || entry.evalKind === 'book' ? Number(entry.evalScore).toFixed(1) : String(entry.evalScore));
+    out.push([
+      entry.moveNumber,
+      entry.color.toUpperCase(),
+      summaryToken(entry.coordinate),
+      entry.source || 'SEARCH',
+      entry.source === 'BOOK' ? 'Y' : 'N',
+      clean(summaryNamedOpeningAt(entry.moveNumber)),
+      entry.source === 'BOOK' ? clean(entry.bookName) : '-',
+      entry.timeMs,
+      entry.depth,
+      entry.targetDepth,
+      entry.nodes,
+      entry.emptiesBefore ?? '-',
+      evalValue,
+      entry.evalKind || '-',
+      entry.cornerAvailable == null ? '-' : (entry.cornerAvailable ? 'Y' : 'N'),
+      entry.cornerTaken == null ? '-' : (entry.cornerTaken ? 'Y' : 'N'),
+      entry.oppCornersGiven?.length ? entry.oppCornersGiven.join(' ') : '-',
+      notes.length ? notes.join(',') : '-',
+      ...(isBotVsBot ? [entry.botKey === 'A' ? 'bot1' : (entry.botKey === 'B' ? 'bot2' : '-'), clean(entry.botLabel), entry.nps ?? '-', entry.minDepth || '-'] : [])
+    ].join('|'));
+  }
+  out.push('[MOVES]');
+  moveSequenceHistory.forEach((token, index) => {
+    const color = colors[index] === BLACK ? 'BLACK' : 'WHITE';
+    const isBot = entries.some((entry) => entry.moveNumber === index + 1);
+    out.push(`${index + 1} ${color} ${token}${isBot ? ' BOT' : ''}`);
+  });
+  if (isBotVsBot) {
+    // 2.0.7: per-Bot totals for this game and for the finished games.
+    const fmt = (t, prefix) => {
+      const avgDepth = t.searched ? (t.depthSum / t.searched).toFixed(2) : '-';
+      const avgMs = t.moves ? (t.timeSum / t.moves).toFixed(1) : '-';
+      const nps = t.searchedMs > 0 ? Math.round((t.nodes * 1000) / t.searchedMs) : '-';
+      return [`${prefix}_moves=${t.moves}`, `${prefix}_searched=${t.searched}`, `${prefix}_avg_depth=${avgDepth}`, `${prefix}_avg_think_ms=${avgMs}`, `${prefix}_nps=${nps}`];
+    };
+    out.push('[BOTS]');
+    for (const key of ['A', 'B']) {
+      const t = botVsBotBotTotals(entries, key);
+      const prefix = key === 'A' ? 'bot1' : 'bot2';
+      out.push(...fmt(t, prefix));
+      out.push(`${prefix}_solve_from_move=${t.solveMove ?? '-'}`);
+      out.push(`${prefix}_solve_from_empties=${t.solveEmpties ?? '-'}`);
+    }
+    out.push('[SESSION]');
+    out.push(`finished_games=${botVsBotSummaryGames.length}`);
+    for (const key of ['A', 'B']) {
+      const t = botVsBotMergeTotals(botVsBotSummaryGames.map((game) => game.perBot[key]));
+      const prefix = key === 'A' ? 'bot1' : 'bot2';
+      out.push(...fmt(t, prefix));
+      out.push(`${prefix}_wins=${botVsBotSummaryGames.filter((game) => game.winner === key).length}`);
+      out.push(`${prefix}_avg_solve_empties=${t.solveEmptiesList.length ? (t.solveEmptiesList.reduce((a, b) => a + b, 0) / t.solveEmptiesList.length).toFixed(1) : '-'}`);
+    }
+    out.push('game|bot1_color|score_black|score_white|winner|bot1_avg_depth|bot2_avg_depth|bot1_avg_ms|bot2_avg_ms|bot1_solve_empties|bot2_solve_empties');
+    for (const game of botVsBotSummaryGames) {
+      const a = game.perBot.A;
+      const b = game.perBot.B;
+      const d = (t) => (t.searched ? (t.depthSum / t.searched).toFixed(2) : '-');
+      const m = (t) => (t.moves ? (t.timeSum / t.moves).toFixed(1) : '-');
+      out.push([game.game, game.blackKey === 'A' ? 'BLACK' : 'WHITE', game.black, game.white,
+        game.winner ? (game.winner === 'A' ? 'bot1' : 'bot2') : 'draw', d(a), d(b), m(a), m(b), a.solveEmpties ?? '-', b.solveEmpties ?? '-'].join('|'));
+    }
+  }
+  out.push('[SEQUENCE]');
+  out.push(moveSequenceHistory.join(','));
+  out.push('[END]');
+  return out.join('\n');
+}
+
+async function copyDubExport() {
+  const text = buildDubExport();
+  const button = document.getElementById('copyDubButton');
+  try {
+    await navigator.clipboard.writeText(text);
+    if (button) {
+      const original = button.textContent;
+      button.textContent = 'Copied';
+      window.setTimeout(() => { button.textContent = original; }, 1200);
+    }
+  } catch {
+    if (botDeveloperOutput) {
+      botDeveloperOutput.value = text;
+      botDeveloperOutput.focus();
+      botDeveloperOutput.select();
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 2.0.7: Bot Summary for Bot vs Bot. Every Bot move is labelled with the Bot
+// that played it, e.g. "Bot 1 (Hard 1.1s) Black", and the summary gives
+// per-Bot totals for this game and for the finished games of the session.
+// It only reads the stats the engine returns with every move.
+// -----------------------------------------------------------------------------
+let botVsBotSummaryGames = [];
+
+function botVsBotSummaryIdentity(player) {
+  if (opponentMode !== 'botvsbot') return {};
+  const key = botVsBotKeyFor(player);
+  const colour = player === BLACK ? 'Black' : 'White';
+  return {
+    botKey: key,
+    botName: botVsBotName(key),
+    botLabel: `${botVsBotName(key)} ${colour}`,
+    botDifficulty: botVsBotBots[key].difficulty,
+    botThinkingMs: botVsBotBots[key].thinkingTimeMs
+  };
+}
+
+// Totals for one Bot's moves in one game.
+function botVsBotBotTotals(entries, key) {
+  const mine = entries.filter((entry) => entry.botKey === key);
+  const searched = mine.filter((entry) => entry.source !== 'BOOK' && entry.source !== 'FORCED');
+  const midgame = searched.filter((entry) => !entry.exactSolve);
+  const solveEntry = mine.find((entry) => entry.exactSolve) || null;
+  const sum = (list, field) => list.reduce((total, entry) => total + (Number(entry[field]) || 0), 0);
+  return {
+    moves: mine.length,
+    book: mine.filter((entry) => entry.source === 'BOOK').length,
+    forced: mine.filter((entry) => entry.source === 'FORCED').length,
+    searched: searched.length,
+    solves: mine.filter((entry) => entry.exactSolve).length,
+    midgameMoves: midgame.length,
+    midgameDepthSum: sum(midgame, 'depth'),
+    depthSum: sum(searched, 'depth'),
+    timeSum: sum(mine, 'timeMs'),
+    searchedMs: sum(searched, 'timeMs'),
+    nodes: sum(searched, 'nodes'),
+    maxTimeMs: mine.reduce((best, entry) => Math.max(best, Number(entry.timeMs) || 0), 0),
+    solveMove: solveEntry ? solveEntry.moveNumber : null,
+    solveEmpties: solveEntry ? (solveEntry.emptiesBefore ?? solveEntry.empties ?? null) : null
+  };
+}
+
+function botVsBotMergeTotals(list) {
+  const out = { games: list.length, moves: 0, book: 0, forced: 0, searched: 0, solves: 0, midgameMoves: 0, midgameDepthSum: 0, depthSum: 0, timeSum: 0, searchedMs: 0, nodes: 0, maxTimeMs: 0, solveEmptiesList: [] };
+  for (const t of list) {
+    for (const field of ['moves', 'book', 'forced', 'searched', 'solves', 'midgameMoves', 'midgameDepthSum', 'depthSum', 'timeSum', 'searchedMs', 'nodes']) out[field] += t[field];
+    out.maxTimeMs = Math.max(out.maxTimeMs, t.maxTimeMs);
+    if (t.solveEmpties != null) out.solveEmptiesList.push(t.solveEmpties);
+  }
+  return out;
+}
+
+function botVsBotTotalsLine(t) {
+  const avgDepth = t.searched ? (t.depthSum / t.searched).toFixed(2) : 'n/a';
+  const avgMidDepth = t.midgameMoves ? (t.midgameDepthSum / t.midgameMoves).toFixed(2) : 'n/a';
+  const avgMs = t.moves ? (t.timeSum / t.moves).toFixed(0) : 'n/a';
+  const nps = t.searchedMs > 0 ? Math.round((t.nodes * 1000) / t.searchedMs).toLocaleString('en-US') : 'n/a';
+  return `${t.moves} moves (${t.book} book, ${t.forced} forced, ${t.searched} searched, ${t.solves} exact solves) · ` +
+    `avg depth ${avgDepth} (midgame ${avgMidDepth}) · avg think ${avgMs} ms (longest ${Math.round(t.maxTimeMs)} ms) · ${nps} nodes/s`;
+}
+
+function updateBotVsBotDeveloperPanel() {
+  const info = summaryHeaderInfo();
+  const entries = summaryActiveEntries();
+  const blackKey = botVsBotBlackKey();
+  const whiteKey = blackKey === 'A' ? 'B' : 'A';
+  const lines = [
+    'Cube Reversi Bot Summary — Bot vs Bot',
+    `Version: ${SUMMARY_VERSION}`,
+    `Board: ${info.boardLabel}`,
+    `Game ${botVsBotGameIndex + 1}: ${botVsBotName(blackKey)} Black vs ${botVsBotName(whiteKey)} White`,
+    `Score: Black ${info.score.black} · White ${info.score.white} — ${info.result.text}`,
+    `Session: ${botVsBotTallyText()}`,
+    `Browser: ${navigator.userAgent}`,
+    `Moves recorded: ${entries.length}`,
+    ''
+  ];
+  if (entries.length) {
+    lines.push('Move | Bot | Coordinate | Source | Time (ms) | Budget (ms) | Depth | Target | Nodes | Nodes/s | Empties | Exact | Eval');
+    for (const entry of entries) {
+      const source = entry.source || 'SEARCH';
+      const sourceText = source === 'BOOK' ? `BOOK${entry.bookName ? ` (${entry.bookName})` : ''}` : source;
+      const exact = entry.exactSolve ? `YES (${entry.solvedDiscDiff > 0 ? '+' : ''}${entry.solvedDiscDiff})` : '';
+      const budget = entry.timeBudgetMs != null ? Math.round(entry.timeBudgetMs) : '';
+      const empties = entry.emptiesBefore ?? entry.empties ?? '';
+      // Target: Medium's fixed depth cap; Hard searches at least minDepth
+      // (Medium's cap + 1) and then deeper while time allows; an exact
+      // solve targets the end of the game.
+      const target = source === 'BOOK' || source === 'FORCED' ? '-'
+        : (source === 'SOLVE' || entry.exactSolve) ? `${empties} (end)`
+          : entry.minDepth > 0 ? `≥${entry.minDepth} (timed)` : entry.targetDepth;
+      lines.push(`${entry.moveNumber} | ${entry.botLabel || entry.color} | ${entry.coordinate} | ${sourceText} | ${entry.timeMs} | ${budget} | ${entry.depth} | ${target} | ${entry.nodes} | ${entry.nps ?? ''} | ${empties} | ${exact} | ${summaryFormatEval(entry)}`);
+    }
+  } else {
+    lines.push('No Bot moves recorded yet.');
+  }
+  lines.push('');
+  lines.push(`This game — per Bot`);
+  for (const key of [blackKey, whiteKey]) {
+    const t = botVsBotBotTotals(entries, key);
+    const colour = key === blackKey ? 'Black' : 'White';
+    lines.push(`${botVsBotName(key)} ${colour}: ${botVsBotTotalsLine(t)}`);
+    lines.push(`  Exact solve began: ${t.solveMove ? `move ${t.solveMove} (${t.solveEmpties} empties)` : 'not yet'}`);
+  }
+  lines.push('');
+  const finished = botVsBotSummaryGames;
+  lines.push(`Session — per Bot over ${finished.length} finished game${finished.length === 1 ? '' : 's'} with Bot Summary on`);
+  if (finished.length) {
+    for (const key of ['A', 'B']) {
+      const t = botVsBotMergeTotals(finished.map((game) => game.perBot[key]));
+      const wins = finished.filter((game) => game.winner === key).length;
+      const losses = finished.filter((game) => game.winner && game.winner !== key).length;
+      const draws = finished.length - wins - losses;
+      const solveList = t.solveEmptiesList;
+      const solveText = solveList.length
+        ? `avg ${(solveList.reduce((a, b) => a + b, 0) / solveList.length).toFixed(1)} empties (earliest ${Math.max(...solveList)}, in ${solveList.length} of ${finished.length} games)`
+        : 'never';
+      lines.push(`${botVsBotName(key)}: ${wins} W / ${losses} L / ${draws} D`);
+      lines.push(`  ${botVsBotTotalsLine(t)}`);
+      lines.push(`  Exact solve began at: ${solveText}`);
+    }
+    lines.push('');
+    lines.push('Game | Bot 1 colour | Score B–W | Winner | Bot 1 avg depth | Bot 2 avg depth | Bot 1 avg ms | Bot 2 avg ms | Bot 1 solve from | Bot 2 solve from');
+    for (const game of finished) {
+      const a = game.perBot.A;
+      const b = game.perBot.B;
+      const depth = (t) => (t.searched ? (t.depthSum / t.searched).toFixed(2) : '-');
+      const ms = (t) => (t.moves ? (t.timeSum / t.moves).toFixed(0) : '-');
+      const solve = (t) => (t.solveEmpties != null ? `${t.solveEmpties} empties` : '-');
+      const winner = game.winner ? (game.winner === 'A' ? 'Bot 1' : 'Bot 2') : 'Draw';
+      lines.push(`${game.game} | ${game.blackKey === 'A' ? 'Black' : 'White'} | ${game.black}–${game.white} | ${winner} | ${depth(a)} | ${depth(b)} | ${ms(a)} | ${ms(b)} | ${solve(a)} | ${solve(b)}`);
+    }
+  } else {
+    lines.push('No finished games yet.');
+  }
   botDeveloperOutput.value = lines.join('\n');
 }
 
@@ -994,7 +2185,7 @@ function createBotWorker() {
     return null;
   }
 
-  const botModuleUrl = new URL('./CubeReversiBot.js?v=1.33.1', import.meta.url).href;
+  const botModuleUrl = new URL('./CubeReversiBot.js?v=2.0.9', import.meta.url).href;
   const workerSource = `
     import { chooseMove } from ${JSON.stringify(botModuleUrl)};
     self.onmessage = (event) => {
@@ -1082,7 +2273,7 @@ function hideBotThinkingIndicator() {
 }
 
 function scheduleBotTurn() {
-  if (!isBotTurn() || passMessageActive || botMoveTimer !== null) return;
+  if (!isBotTurn() || passMessageActive || botMoveTimer !== null || botVsBotMoveDelayTimer !== null) return;
 
   showBotThinkingIndicator();
   botMoveTimer = setTimeout(() => {
@@ -1127,9 +2318,11 @@ function scheduleBotTurn() {
       boardSize: SIZE,
       boardDepth: BOARD_DEPTH,
       player: currentPlayer,
-      difficulty: botDifficulty,
-      thinkingTimeMs: getConfiguredBotThinkingTimeMs(),
-      developerMode,
+      difficulty: currentBotDifficulty(),
+      thinkingTimeMs: currentBotThinkingTimeMs(),
+      // 2.0.7: in Bot vs Bot the Bot Summary only reads the stats the engine
+      // always returns, so the search is identical with the summary on or off.
+      developerMode: opponentMode === 'botvsbot' ? false : developerMode,
       board: board.map((plane) => plane.map((row) => row.slice()))
     };
 
@@ -1145,6 +2338,9 @@ function scheduleBotTurn() {
 
       if (developerMode) {
       botDeveloperEntries.push({
+        ...botVsBotSummaryIdentity(currentPlayer),
+        nps: searchStats.nps ?? (botSearchTimeMs > 0 ? Math.round(((searchStats.nodes ?? 0) * 1000) / botSearchTimeMs) : 0),
+        minDepth: searchStats.minDepth ?? 0,
         moveNumber: moveSequenceHistory.length + 1,
         color: currentPlayer === BLACK ? 'Black' : 'White',
         coordinate: coordinateNotation(move[0], move[1], move[2]),
@@ -1157,6 +2353,11 @@ function scheduleBotTurn() {
         tableEntries: searchStats.tableEntries ?? 0,
         source: searchStats.source || 'SEARCH',
         bookName: searchStats.bookName || '',
+        ...analyzeBotMoveForSummary(move, currentPlayer, searchStats),
+        timeBudgetMs: searchStats.timeBudgetMs ?? null,
+        empties: searchStats.empties ?? null,
+        exactSolve: Boolean(searchStats.exactSolve),
+        solvedDiscDiff: searchStats.solvedDiscDiff ?? null,
         rootCandidateScores: Array.isArray(searchStats.rootCandidateScores)
           ? searchStats.rootCandidateScores.map((candidate) => ({
               move: candidate.move.slice(),
@@ -1179,8 +2380,7 @@ function scheduleBotTurn() {
         updateBotDeveloperPanel();
       }
 
-      hideBotThinkingIndicator();
-      playMove(move[0], move[1], move[2], true);
+      commitBotMove(move);
     }).catch((error) => {
       console.error('Cube Reversi Bot Worker error:', error);
       hideBotThinkingIndicator();
@@ -1193,6 +2393,9 @@ function scheduleBotTurn() {
         const fallbackStats = chooseMove.lastSearchStats || {};
         if (developerMode) {
           botDeveloperEntries.push({
+            ...botVsBotSummaryIdentity(currentPlayer),
+            nps: fallbackStats.nps ?? 0,
+            minDepth: fallbackStats.minDepth ?? 0,
             moveNumber: moveSequenceHistory.length + 1,
             color: currentPlayer === BLACK ? 'Black' : 'White',
             coordinate: coordinateNotation(fallbackMove[0], fallbackMove[1], fallbackMove[2]),
@@ -1205,6 +2408,11 @@ function scheduleBotTurn() {
             tableEntries: fallbackStats.tableEntries ?? 0,
             source: fallbackStats.source || 'SEARCH',
             bookName: fallbackStats.bookName || '',
+            ...analyzeBotMoveForSummary(fallbackMove, currentPlayer, fallbackStats),
+            timeBudgetMs: fallbackStats.timeBudgetMs ?? null,
+            empties: fallbackStats.empties ?? null,
+            exactSolve: Boolean(fallbackStats.exactSolve),
+            solvedDiscDiff: fallbackStats.solvedDiscDiff ?? null,
             rootCandidateScores: Array.isArray(fallbackStats.rootCandidateScores)
               ? fallbackStats.rootCandidateScores.map((candidate) => ({
                   move: candidate.move.slice(),
@@ -1227,7 +2435,7 @@ function scheduleBotTurn() {
           updateBotDeveloperPanel();
         }
         if (isBotTurn() && !passMessageActive) {
-          playMove(fallbackMove[0], fallbackMove[1], fallbackMove[2], true);
+          commitBotMove(fallbackMove);
         }
       } catch (fallbackError) {
         console.error('Cube Reversi Bot fallback error:', fallbackError);
@@ -1651,7 +2859,7 @@ function armBlueOpacityStopTimer() {
     if (blueOpacityAnimationActive && inactiveFor >= BLUE_OPACITY_TIMEOUT) {
       blueOpacityAnimationActive = false;
       if (legalSurface) legalSurface.material.opacity = BLUE_OPACITY_IDLE;
-      if (!autoRotateEnabled && !flipAnimationActive) stopContinuousRendering();
+      if (!autoRotateEnabled && !cameraAnimationActive()) stopContinuousRendering();
       requestRender();
     } else if (blueOpacityAnimationActive) {
       armBlueOpacityStopTimer();
@@ -1921,11 +3129,20 @@ function updateStatus() {
   blackScore = black;
   whiteScore = white;
 
-  playingAsLabel.textContent = opponentMode === 'human'
-    ? 'Playing As: Black & White'
-    : `Playing As: ${humanPlayer === BLACK ? 'Black' : 'White'}`;
+  playingAsLabel.textContent = opponentMode === 'botvsbot'
+    ? (rewindState ? 'Bot vs Bot (Rewind)' : (botVsBotPaused && !gameCompleteActive ? 'Bot vs Bot (Paused)' : 'Bot vs Bot'))
+    : opponentMode === 'human'
+      ? 'Playing As: Black & White'
+      : `Playing As: ${humanPlayer === BLACK ? 'Black' : 'White'}`;
 
-  if (gameCompleteActive) {
+  if (rewindState) {
+    // 2.0.9: rewind shows the viewed position's turn and "Move N of M".
+    const atLive = rewindState.index === rewindState.total;
+    turnText.textContent = atLive && gameCompleteActive
+      ? 'Game Complete'
+      : (currentPlayer === BLACK ? "Black's turn" : "White's turn");
+    turnMoveCount.textContent = rewindMoveLabel();
+  } else if (gameCompleteActive) {
     // A completed game has no next player and therefore no meaningful legal
     // move count. Keep the header truthful instead of displaying a stale
     // player turn with 0 Available moves.
@@ -1934,16 +3151,43 @@ function updateStatus() {
   } else {
     turnText.textContent = currentPlayer === BLACK ? "Black's turn" : "White's turn";
     const currentLegalMoveCount = legalMoves(currentPlayer).length;
-    turnMoveCount.textContent = `${currentLegalMoveCount} Available moves`;
+    turnMoveCount.textContent = availableMovesLabel(currentLegalMoveCount);
   }
 
   scoreLabel.textContent = `Black ${black} · White ${white}`;
   emptySpacesLabel.textContent = `Spaces Remaining: ${empty}`;
-  botDifficultyLabel.textContent = opponentMode === 'bot' ? `Bot: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}` : '';
-  botDifficultyLabel.hidden = opponentMode !== 'bot';
+  if (opponentMode === 'botvsbot') {
+    // 2.0.5: show which Bot plays which colour in this game (they alternate).
+    // Listed Bot 1 then Bot 2, each with its colour in this game.
+    const describe = (key, short) => {
+      const black = botVsBotKeyFor(BLACK) === key;
+      return `${botVsBotName(key, short)}, ${black ? 'Black' : 'White'}`;
+    };
+    setLongShortLabel(botDifficultyLabel, `Game ${botVsBotGameIndex + 1} · ${describe('A', false)} · ${describe('B', false)}`, `${describe('A', true)} · ${describe('B', true)}`);
+    if (botVsBotTallyLabel) {
+      setLongShortLabel(botVsBotTallyLabel, botVsBotTallyText(), botVsBotTallyShortText());
+      botVsBotTallyLabel.hidden = false;
+    }
+  } else {
+    if (botVsBotTallyLabel) botVsBotTallyLabel.hidden = true;
+    if (botVsBotCountdownLabel) botVsBotCountdownLabel.hidden = true;
+    botDifficultyLabel.textContent = opponentMode === 'bot' ? `Bot: ${capitalizeDifficulty(botDifficulty)}` : '';
+  }
+  botDifficultyLabel.hidden = opponentMode !== 'bot' && opponentMode !== 'botvsbot';
+  // 2.0.2: phone header uses a decluttered row layout in Bot vs Bot.
+  if (topbarElement) topbarElement.classList.toggle('bot-vs-bot-hud', opponentMode === 'botvsbot');
   updateResignButton();
+  updateBotVsBotPauseButton();
+  updateRewindControls();
   updateClockDisplay();
   updateBotDeveloperPanel();
+}
+
+// 1.35.2: HUD move-count label. Singular only for exactly one move
+// ("1 Available move"); every other count, including 0, is plural.
+// Shared by Classic and all cube board sizes.
+function availableMovesLabel(count) {
+  return `${count} Available ${count === 1 ? 'move' : 'moves'}`;
 }
 
 function parseCoordinateNotation(value) {
@@ -1982,11 +3226,21 @@ function parseCoordinateNotation(value) {
 // This catalog is display-only. It does not change Bot move selection. It
 // recognizes established named openings and named continuations from the
 // current move sequence, including all eight board symmetries.
+// 1.35.1: de-duplicated to 47 lines with unique names and unique move
+// sequences. Removed: second copies of Tamenori and Stephenson, a
+// "Leader's Tiger" copy that repeated Stephenson's moves, a second
+// Rose-Bill line one move longer than the first (the shorter Rose-Bill
+// still matches it), and "Buffalo - Kenichi Variation", which had exactly
+// the same moves as Buffalo.
+// 2.0.9: Aubrey / Tanaka corrected to F5 D6 C3 D3 C4 B3 (it had the
+// F4 C5 B3 line), and Nicolet (the C2 E3 line the Bot plays) added, per the
+// weltyc and Edax opening lists.
 const CLASSIC_OPENING_RECOGNITION_LINES = [
   { opening: 'Perpendicular', moves: 'F5 D6' },
   { opening: 'Tiger', moves: 'F5 D6 C3 D3 C4' },
-  { opening: 'Tiger', variation: 'Aubrey / Tanaka', moves: 'F5 D6 C3 D3 C4 F4 C5 B3' },
+  { opening: 'Tiger', variation: 'Aubrey / Tanaka', moves: 'F5 D6 C3 D3 C4 B3' },
   { opening: 'Tiger', variation: 'Rose-Bill', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2' },
+  { opening: 'Tiger', variation: 'Nicolet', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E3' },
   { opening: 'Tiger', variation: 'Tamenori', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E6' },
   { opening: 'Tiger', variation: "Leader's Tiger", moves: 'F5 D6 C3 D3 C4 F4 E6' },
   { opening: 'Tiger', variation: 'Stephenson', moves: 'F5 D6 C3 D3 C4 F4 F6' },
@@ -1997,10 +3251,6 @@ const CLASSIC_OPENING_RECOGNITION_LINES = [
   { opening: 'Rose', variation: 'Shaman / Danish', moves: 'F5 D6 C5 F4 E3 C6 F3' },
   { opening: 'Rose', variation: 'Bhagat', moves: 'F5 D6 C5 F4 E3 C6 D7' },
   { opening: 'Tiger', variation: 'Mainline Tiger', moves: 'F5 D6 C3 D3 C4 F4 C5 B4 B5 C6 F3 E6 E3 G6 F6 G5 D7 G3' },
-  { opening: 'Tiger', variation: 'Rose-Bill', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E3' },
-  { opening: 'Tiger', variation: 'Tamenori', moves: 'F5 D6 C3 D3 C4 F4 C5 B3 C2 E6' },
-  { opening: 'Tiger', variation: "Leader's Tiger", moves: 'F5 D6 C3 D3 C4 F4 F6' },
-  { opening: 'Tiger', variation: 'Stephenson', moves: 'F5 D6 C3 D3 C4 F4 F6' },
   { opening: 'Tiger', variation: 'Kung', moves: 'F5 D6 C3 D3 C4 F4 F6 B4' },
   { opening: 'Tiger', variation: "Comp'Oth", moves: 'F5 D6 C3 D3 C4 F4 F6 F3' },
   { opening: 'Tiger', variation: 'No-Kung', moves: 'F5 D6 C3 D3 C4 F4 F6 G5' },
@@ -2018,7 +3268,6 @@ const CLASSIC_OPENING_RECOGNITION_LINES = [
   { opening: 'Buffalo', variation: 'Hokuriku Buffalo', moves: 'F5 F6 E6 D6 C3 D3' },
   { opening: 'Buffalo', variation: 'Tanida Buffalo', moves: 'F5 F6 E6 D6 C3 F4 C6 D3 E3 D2' },
   { opening: 'Buffalo', variation: 'Maruoka Buffalo', moves: 'F5 F6 E6 D6 C3 G4 C6' },
-  { opening: 'Buffalo', variation: 'Kenichi Variation', moves: 'F5 F6 E6 D6 C3' },
   { opening: 'Heath', moves: 'F5 F6 E6 D6 E7' },
   { opening: 'Heath', variation: 'Heath-Chimney / Mass-Turning', moves: 'F5 F6 E6 D6 E7 F4' },
   { opening: 'Heath', variation: 'Heath-Bat', moves: 'F5 F6 E6 D6 E7 G5 C5' },
@@ -2133,26 +3382,44 @@ function getRecognizedClassicOpening(history) {
 
   return candidates[0].line;
 }
-// Name Openings applies only to 8×8×1 Classic mode, so
-// remove the sidebar control from all other board sizes.
+// 1.35.0: Name Openings applies to 8×8×1 Classic and to the cube boards
+// (4×4×4, 6×6×6, 8×8×8), which now have their own opening book. The sidebar
+// control is removed on all other board shapes.
+function boardHasOpeningNames() {
+  if (SIZE === 8 && BOARD_DEPTH === 1) return true;
+  return BOARD_DEPTH === SIZE && (SIZE === 4 || SIZE === 6 || SIZE === 8);
+}
+
+function getRecognizedCubeOpening(history) {
+  if (BOARD_DEPTH !== SIZE) return null;
+  try {
+    const found = recognizeCubeOpening(history, SIZE);
+    return found ? { opening: found.family, variation: found.variation } : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function updateBookOpeningControlAvailability() {
   const bookOpeningsControl = bookOpeningsToggle.closest('label');
-  const isClassic = SIZE === 8 && BOARD_DEPTH === 1;
+  const available = boardHasOpeningNames();
   if (bookOpeningsControl) {
-    bookOpeningsControl.hidden = !isClassic;
-    bookOpeningsControl.style.display = isClassic ? '' : 'none';
+    bookOpeningsControl.hidden = !available;
+    bookOpeningsControl.style.display = available ? '' : 'none';
   }
 }
 
 function updateBookOpeningLabel() {
   if (!bookOpeningLabel) return;
-  if (!bookOpeningsEnabled || BOARD_DEPTH !== 1 || SIZE !== 8) {
+  if (!bookOpeningsEnabled || !boardHasOpeningNames()) {
     bookOpeningLabel.hidden = true;
     bookOpeningLabel.textContent = '';
     return;
   }
 
-  const recognized = getRecognizedClassicOpening(moveSequenceHistory);
+  const recognized = BOARD_DEPTH === 1
+    ? getRecognizedClassicOpening(moveSequenceHistory)
+    : getRecognizedCubeOpening(moveSequenceHistory);
   if (!recognized) {
     bookOpeningLabel.hidden = true;
     bookOpeningLabel.textContent = '';
@@ -2169,9 +3436,12 @@ function updateMoveSequenceDisplay() {
   moveSequence.value = moveSequenceHistory.join(', ');
   moveSequence.scrollTop = moveSequence.scrollHeight;
   updateBookOpeningLabel();
+  // 1.35.1: keep the Bot Summary header (score/result) current after every move.
+  updateBotDeveloperPanel();
 }
 
 function updateUndoButton() {
+  if (opponentMode === 'botvsbot') { undoButton.disabled = true; return; }
   const timedGame = configuredClockDurationMs() !== null;
   const timedTwoHumanGame = opponentMode === 'human' && timedGame;
   if (timedTwoHumanGame) {
@@ -2182,6 +3452,7 @@ function updateUndoButton() {
 }
 
 function updateRedoButton() {
+  if (opponentMode === 'botvsbot') { redoButton.disabled = true; return; }
   const timedTwoHumanGame = opponentMode === 'human' && configuredClockDurationMs() !== null;
   if (timedTwoHumanGame) {
     redoButton.disabled = true;
@@ -2282,7 +3553,7 @@ function restoreGameSnapshot(snapshot) {
 }
 
 function undoMove() {
-  if (!undoHistory.length) return;
+  if (!undoHistory.length || opponentMode === 'botvsbot') return;
 
   // Undo always reverses exactly one committed move, regardless of whether
   // the opponent is another human or the bot. In Bot mode this means a bot
@@ -2336,7 +3607,7 @@ function applyHistoryReviewTurn() {
 }
 
 function redoMove() {
-  if (!redoHistory.length) return;
+  if (!redoHistory.length || opponentMode === 'botvsbot') return;
 
   if (botMoveTimer !== null) {
     clearTimeout(botMoveTimer);
@@ -2420,6 +3691,8 @@ function hideMoveSequence() {
 let loadSequenceOpenedFromStart = false;
 
 function showLoadSequencePanel(fromStartScreen = false) {
+  cancelBotVsBotCountdown();
+  updateBotVsBotPauseButton();
   hideMoveSequence();
   loadSequenceOpenedFromStart = fromStartScreen;
   if (fromStartScreen) {
@@ -2506,6 +3779,7 @@ function parseMoveSequenceText(text) {
 }
 
 function resetBoardForSequenceLoad() {
+  rewindState = null; // 2.0.9
   for (let x = 0; x < SIZE; x++) {
     for (let y = 0; y < SIZE; y++) {
       for (let z = 0; z < BOARD_DEPTH; z++) {
@@ -2739,6 +4013,7 @@ function hideLoadedSequenceChoice() {
 }
 
 function continueLoadedSequence() {
+  cancelBotVsBotCountdown();
   const selectedMode = document.querySelector('input[name="loadedPlayerMode"]:checked')?.value || 'both';
 
   if (selectedMode === 'black') {
@@ -2887,9 +4162,11 @@ function showPassMessage(player) {
   passOverlay.classList.add('visible');
   updateLegalCells();
   updateStatus();
+  if (opponentMode === 'botvsbot') armBotVsBotPassTimer();
 }
 
 function dismissPassMessage() {
+  if (botVsBotPassTimer !== null) { clearTimeout(botVsBotPassTimer); botVsBotPassTimer = null; }
   // Track the actual passing player explicitly. This prevents a pass from
   // being advanced from a stale/changed currentPlayer value, which previously
   // could hand the bot the human's turn or leave the wrong color active.
@@ -2982,16 +4259,29 @@ function showGameComplete() {
     result = `Draw\nBlack ${black} · White ${white}`;
   }
 
+  // 2.0.5: in Bot vs Bot the result names the winning Bot (colours alternate).
+  if (opponentMode === 'botvsbot' && black !== white) {
+    const winner = botVsBotKeyFor(black > white ? BLACK : WHITE) === 'A' ? 'Bot 1' : 'Bot 2';
+    result = `${winner} (${black > white ? 'Black' : 'White'}) wins\nBlack ${black} · White ${white}`;
+  }
+
   passMessage.textContent = `Game Complete\n${result}`;
   gameCompleteActive = true;
   gameInProgress = false;
   passOverlay.classList.add('visible');
   stopGameClock();
+  updateBotDeveloperPanel();
+  if (opponentMode === 'botvsbot') {
+    recordBotVsBotResult(black, white);
+    startBotVsBotCountdown(`Game Complete\n${result}`);
+  }
 }
 
 function playMove(x, y, z, isBotMove = false) {
-  if (passMessageActive || gameCompleteActive) return;
+  if (passMessageActive || gameCompleteActive || rewindState) return;
   if (opponentMode === 'bot' && currentPlayer !== humanPlayer && !isBotMove) return;
+  // 2.0: in Bot vs Bot only the Bots place discs.
+  if (opponentMode === 'botvsbot' && !isBotMove) return;
   if (!isLegalMove(x, y, z, currentPlayer)) return;
 
   historyReviewActive = false;
@@ -3027,6 +4317,12 @@ function playMove(x, y, z, isBotMove = false) {
 
   updatePieces();
   updateOccupiedSurface();
+
+  if (opponentMode === 'botvsbot') {
+    botVsBotLastMoveAt = performance.now();
+    rotateViewToMove(x, y, z);
+    keepBotVsBotAutoRotating();
+  }
 
   const nextPlayer = opponent(currentPlayer);
   const nextMoves = legalMoves(nextPlayer);
@@ -3100,14 +4396,14 @@ function confirmResignation() {
 }
 
 function resignGame() {
-  if (gameCompleteActive) return;
+  if (gameCompleteActive || opponentMode === 'botvsbot') return;
   showResignConfirmation();
 }
 
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   versionLabel.innerHTML = `<span class="version-board-size">${boardSizeText}</span>`;
-  document.title = `Cube Reversi`;
+  document.title = `Cube Reversi – 3D Reversi Game`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
 
@@ -3161,7 +4457,13 @@ function resetBoardForNewGame() {
   // result from the previous game, terminate its Worker, and clear all
   // per-game diagnostic/history state before the new opening position is built.
   botGameSessionId++;
+  rewindState = null; // 2.0.9: the old game's rewind history is dropped.
   if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+  clearBotVsBotTimers();
+  cancelBotVsBotCountdown();
+  botVsBotGameCounted = false;
+  botVsBotPaused = false;
+  faceTurnAnimation = null;
   cancelBotSearch();
   hideBotThinkingIndicator();
   resetBotDeveloperSummary();
@@ -3214,18 +4516,81 @@ function resetBoardForNewGame() {
 const BOT_THINKING_TIME_DEFAULTS = {
   easy: 0.1,
   medium: 0.7,
-  hard: 5
+  hard: 1.1
 };
 
+// 2.0: the thinking-time helpers take the input (and its difficulty radio
+// group) so the single Bot control and both Bot vs Bot controls share them.
+function setThinkingTimeDefaultFor(input, difficultyRadioName) {
+  if (!input) return;
+  const difficulty = document.querySelector(`input[name="${difficultyRadioName}"]:checked`)?.value || 'medium';
+  input.value = String(BOT_THINKING_TIME_DEFAULTS[difficulty] ?? BOT_THINKING_TIME_DEFAULTS.medium);
+  delete input.dataset.edited;
+}
+
 function setBotThinkingTimeDefault() {
-  if (!botThinkingTimeInput) return;
-  const difficulty = document.querySelector('input[name="botDifficulty"]:checked')?.value || 'medium';
-  botThinkingTimeInput.value = String(BOT_THINKING_TIME_DEFAULTS[difficulty] ?? BOT_THINKING_TIME_DEFAULTS.medium);
+  setThinkingTimeDefaultFor(botThinkingTimeInput, 'botDifficulty');
+}
+
+// 2.0.5: the Thinking Time box sits behind an "Advanced" toggle (collapsed by
+// default). Collapsed, the Bot uses its level's default time. Expanded, the
+// box shows the time, prefilled with the level default and editable.
+function isThinkingTimeAdvancedOpen(input) {
+  const row = input?.closest('.bot-thinking-time-row');
+  return !!row && !row.hidden;
+}
+
+function levelDefaultThinkingTimeMs(difficulty) {
+  return (BOT_THINKING_TIME_DEFAULTS[difficulty] ?? BOT_THINKING_TIME_DEFAULTS.medium) * 1000;
+}
+
+// The time a Bot will use: the level default when Advanced is collapsed (or
+// the box is empty / invalid), otherwise the value in the box.
+function effectiveThinkingTimeMs(input, difficulty) {
+  if (!isThinkingTimeAdvancedOpen(input)) return levelDefaultThinkingTimeMs(difficulty);
+  sanitizeThinkingTimeInput(input);
+  const ms = thinkingTimeMsFromInput(input);
+  if (ms === null) {
+    setThinkingTimeDefaultFor(input, input.dataset.difficultyRadio);
+    return levelDefaultThinkingTimeMs(difficulty);
+  }
+  return ms;
+}
+
+// Level changed: collapsed -> always follow the level; expanded -> follow it
+// unless the user has typed their own value.
+function onBotLevelChangedFor(input) {
+  if (!input) return;
+  if (isThinkingTimeAdvancedOpen(input) && input.dataset.edited === 'true') return;
+  setThinkingTimeDefaultFor(input, input.dataset.difficultyRadio);
+}
+
+function setThinkingTimeAdvancedOpen(button, open) {
+  const row = document.getElementById(button.getAttribute('aria-controls'));
+  const input = document.getElementById(button.dataset.advancedFor);
+  if (!row) return;
+  row.hidden = !open;
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  button.classList.toggle('open', open);
+  // Collapsing goes back to the level default, so what the box shows the
+  // next time it is opened matches what the Bot will use.
+  if (!open && input) setThinkingTimeDefaultFor(input, input.dataset.difficultyRadio);
+}
+
+function thinkingTimeMsFromInput(input) {
+  if (!input) return null;
+  const value = Number(input.value);
+  if (input.value === '' || !Number.isFinite(value) || value < 0) return null;
+  return Math.min(10, value) * 1000;
 }
 
 function sanitizeBotThinkingTimeInput() {
-  if (!botThinkingTimeInput) return;
-  let value = botThinkingTimeInput.value.replace(/[^0-9.]/g, '');
+  sanitizeThinkingTimeInput(botThinkingTimeInput);
+}
+
+function sanitizeThinkingTimeInput(input) {
+  if (!input) return;
+  let value = input.value.replace(/[^0-9.]/g, '');
   const firstDot = value.indexOf('.');
   if (firstDot !== -1) {
     value = value.slice(0, firstDot + 1) + value.slice(firstDot + 1).replace(/\./g, '');
@@ -3234,7 +4599,7 @@ function sanitizeBotThinkingTimeInput() {
   }
   const numericValue = Number(value);
   if (Number.isFinite(numericValue) && numericValue > 10) value = '10';
-  botThinkingTimeInput.value = value;
+  input.value = value;
 }
 
 function getConfiguredBotThinkingTimeMs() {
@@ -3252,12 +4617,22 @@ function updateStartScreenOptions() {
   // so hide the Start Menu option entirely when Two Player is selected.
   const developerModeOption = document.getElementById('developerModeOption');
   const botModeSelected = selectedOpponent === 'bot';
-  if (startPanel) startPanel.classList.toggle('two-player', !botModeSelected);
+  const botVsBotSelected = selectedOpponent === 'botvsbot';
+  if (startPanel) startPanel.classList.toggle('two-player', selectedOpponent === 'human');
   if (developerModeOption) {
-    developerModeOption.hidden = !botModeSelected;
+    // 2.0.7: Bot Summary is offered for Bot vs Bot as well (default off).
+    developerModeOption.hidden = !botModeSelected && !botVsBotSelected;
   }
-  colorFieldset.classList.toggle('start-hidden', colorHidden);
-  colorFieldset.hidden = colorHidden;
+  const hideColor = colorHidden || botVsBotSelected;
+  colorFieldset.classList.toggle('start-hidden', hideColor);
+  colorFieldset.hidden = hideColor;
+  // 2.0: Bot vs Bot shows a Black Bot and a White Bot panel, each with the
+  // usual Easy / Medium / Hard choice and Thinking Time box.
+  [blackBotFieldset, whiteBotFieldset].forEach((fieldset) => {
+    if (!fieldset) return;
+    fieldset.classList.toggle('start-hidden', !botVsBotSelected);
+    fieldset.hidden = !botVsBotSelected;
+  });
 
   // Timed games are unavailable in Bot Opponent mode. Remove the duration
   // control entirely rather than leaving a disabled selector taking up space.
@@ -3266,15 +4641,23 @@ function updateStartScreenOptions() {
     difficultyFieldset.classList.toggle('start-hidden', !botModeSelected);
     difficultyFieldset.hidden = !botModeSelected;
   }
-  gameDurationLabel.classList.toggle('start-hidden', botModeSelected);
-  gameDurationSelect.classList.toggle('start-hidden', botModeSelected);
-  if (botModeSelected) {
+  const noClock = botModeSelected || botVsBotSelected;
+  gameDurationLabel.classList.toggle('start-hidden', noClock);
+  gameDurationSelect.classList.toggle('start-hidden', noClock);
+  if (noClock) {
     gameDurationSelect.value = 'unlimited';
   }
 }
 
 function showStartScreen() {
+  // 2.0.9: leave rewind (live position back on the board) without resuming.
+  if (rewindState) exitRewind(false);
   if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+  // 2.0: New Game stops a Bot vs Bot match cleanly; any result that arrives
+  // later is ignored because the session id changes.
+  botGameSessionId++;
+  clearBotVsBotTimers();
+  cancelBotVsBotCountdown();
   cancelBotSearch();
   hideBotThinkingIndicator();
   stopGameClock();
@@ -3355,7 +4738,29 @@ function startGameFromSplash() {
       : BLACK;
   gameDuration = gameDurationSelect.value;
   botDifficulty = document.querySelector('input[name="botDifficulty"]:checked')?.value || 'medium';
+  // 2.0.5: with Advanced collapsed the Bot uses its level's default time.
+  if (botThinkingTimeInput && !isThinkingTimeAdvancedOpen(botThinkingTimeInput)) setBotThinkingTimeDefault();
   developerMode = !!developerModeToggle?.checked;
+  if (opponentMode === 'botvsbot') {
+    const readBot = (color, input) => {
+      const difficulty = document.querySelector(`input[name="${color}BotDifficulty"]:checked`)?.value || 'hard';
+      return { difficulty, thinkingTimeMs: effectiveThinkingTimeMs(input, difficulty) };
+    };
+    // 2.0.5: Bot A is set up in the Black Bot panel and plays Black in game 1;
+    // Bot B (White Bot panel) plays White in game 1. They swap every game.
+    botVsBotBots = {
+      A: readBot('black', blackBotThinkingTimeInput),
+      B: readBot('white', whiteBotThinkingTimeInput)
+    };
+    botVsBotGameIndex = 0;
+    assignBotVsBotColours();
+    // 2.0.7: Bot Summary is available in Bot vs Bot (it stays off unless the
+    // Start Menu box is ticked). A new session starts a fresh session summary.
+    botVsBotSummaryGames = [];
+    // 2.0.1: a Bot vs Bot session started from the Start Menu starts a fresh
+    // tally (board size / Bot settings may have changed).
+    botVsBotTally = { games: 0, a: 0, b: 0, draws: 0 };
+  }
 
   gameInProgress = true;
   resetBoardForNewGame();
@@ -3364,7 +4769,19 @@ function startGameFromSplash() {
   // Start the Worker immediately for Bot games so its module can load before
   // the first search is requested. The Worker remains alive for the entire
   // game and is destroyed at the next New Game / Start Menu boundary.
-  if (opponentMode === 'bot') createBotWorker();
+  if (opponentMode === 'bot' || opponentMode === 'botvsbot') createBotWorker();
+  if (opponentMode === 'botvsbot') {
+    botVsBotPaused = false;
+    botVsBotLastMoveAt = performance.now();
+    // Watching Bots play: turn Auto-Rotate on (the player can still switch
+    // it off with the toggle or Spacebar).
+    if (!autoRotateToggle.checked) {
+      autoRotateToggle.checked = true;
+      autoRotateToggle.dispatchEvent(new Event('change'));
+    }
+    keepBotVsBotAutoRotating();
+  }
+  updateStatus();
   scheduleBotTurn();
 }
 
@@ -3548,7 +4965,7 @@ function armAutoRotateStopTimer() {
       // Suspend animation after inactivity but preserve the user's enabled
       // preference so fresh activity can resume Auto-Rotate.
       autoRotateAnimationActive = false;
-      if (!flipAnimationActive) stopContinuousRendering();
+      if (!cameraAnimationActive()) stopContinuousRendering();
       requestRender();
     } else if (autoRotateEnabled) {
       armAutoRotateStopTimer();
@@ -3562,6 +4979,8 @@ function armAutoRotateStopTimer() {
 // timeout callback also verifies the timestamp before suspending the animation.
 function noteAutoRotateActivity() {
   if (!autoRotateEnabled) return;
+  // 2.0.4: touching the cube while Bot vs Bot is paused must not restart it.
+  if (botVsBotViewHeld()) return;
 
   const now = performance.now();
   if (now - autoRotateLastActivityTime < 100) return;
@@ -3616,10 +5035,10 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     !wireframeGroup.children.includes(object)
   );
   const cubeHits = raycaster.intersectObjects(visibleCubeObjects, true);
-  hoveringOverCube = cubeHits.length > 0;
+  hoveringOverCube = cubeHits.length > 0 && opponentMode !== 'botvsbot';
 
   if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube) startContinuousRendering();
-  else if (autoRotateEnabled && autoRotateAnimationActive && hoveringOverCube && !pointerDownPosition && !flipAnimationActive && !blueOpacityAnimationActive) stopContinuousRendering();
+  else if (autoRotateEnabled && autoRotateAnimationActive && hoveringOverCube && !pointerDownPosition && !cameraAnimationActive() && !blueOpacityAnimationActive) stopContinuousRendering();
 
   const legalHit = getFrontmostLegalHit();
 
@@ -3645,12 +5064,12 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   pointerDownLegalKey = null;
   pointerDragged = false;
   if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube) startContinuousRendering();
-  else if (!autoRotateEnabled && !flipAnimationActive && !blueOpacityAnimationActive) stopContinuousRendering();
+  else if (!autoRotateEnabled && !cameraAnimationActive() && !blueOpacityAnimationActive) stopContinuousRendering();
 });
 
 renderer.domElement.addEventListener('pointercancel', () => {
   if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube) startContinuousRendering();
-  else if (!autoRotateEnabled && !flipAnimationActive && !blueOpacityAnimationActive) stopContinuousRendering();
+  else if (!autoRotateEnabled && !cameraAnimationActive() && !blueOpacityAnimationActive) stopContinuousRendering();
   pointerDownPosition = null;
   pointerDownLegalKey = null;
   pointerDragged = false;
@@ -3681,16 +5100,16 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   );
   const cubeHits = raycaster.intersectObjects(visibleCubeObjects, true);
   const wasHoveringOverCube = hoveringOverCube;
-  hoveringOverCube = cubeHits.length > 0;
+  hoveringOverCube = cubeHits.length > 0 && opponentMode !== 'botvsbot';
 
   // Keep Auto-Rotate state synchronized with the cursor while it remains
   // inside the 3D viewport. Moving off the cube must resume rendering without
   // requiring a click or leaving the viewport.
   if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube) {
     startContinuousRendering();
-  } else if (autoRotateEnabled && autoRotateAnimationActive && hoveringOverCube && !pointerDownPosition && !flipAnimationActive && !blueOpacityAnimationActive) {
+  } else if (autoRotateEnabled && autoRotateAnimationActive && hoveringOverCube && !pointerDownPosition && !cameraAnimationActive() && !blueOpacityAnimationActive) {
     stopContinuousRendering();
-  } else if (!wasHoveringOverCube && hoveringOverCube && !pointerDownPosition && !flipAnimationActive && !blueOpacityAnimationActive) {
+  } else if (!wasHoveringOverCube && hoveringOverCube && !pointerDownPosition && !cameraAnimationActive() && !blueOpacityAnimationActive) {
     stopContinuousRendering();
   }
 
@@ -3716,6 +5135,58 @@ renderer.domElement.addEventListener('pointerleave', () => {
 });
 
 let flipAnimationActive = false;
+
+// 2.0: Bot vs Bot "turn to the move". After each Bot move the cube turns
+// smoothly (shortest rotation) so the square just played faces the viewer,
+// then Auto-Rotate carries on from that orientation at its normal speed.
+let faceTurnAnimation = null;
+const FACE_TURN_DURATION = 650;
+// 2.0.1: slower in Bot vs Bot so each move is easy to follow; it finishes
+// well inside the 2-second move rhythm. Same smoothstep easing.
+// 2.0.2: 2.0 s (was 1.4 s) to match the 3-second move rhythm; it still
+// finishes about a second before the next move. Same smoothstep easing.
+const BOT_VS_BOT_FACE_TURN_DURATION = 2000;
+
+function cameraAnimationActive() {
+  return flipAnimationActive || faceTurnAnimation !== null;
+}
+
+function moveFacingDirection(x, y, z) {
+  const position = worldPosition(x, y, z);
+  if (BOARD_DEPTH === 1) {
+    // Classic: keep the board face toward the viewer, leaning slightly
+    // toward the square that was played.
+    return new THREE.Vector3(position.x * 0.06, position.y * 0.06, 1).normalize();
+  }
+  const max = SIZE - 1;
+  const maxZ = BOARD_DEPTH - 1;
+  const outward = new THREE.Vector3(
+    x === 0 ? -1 : x === max ? 1 : 0,
+    y === 0 ? -1 : y === max ? 1 : 0,
+    z === 0 ? -1 : z === maxZ ? 1 : 0
+  );
+  if (position.lengthSq() < 1e-6) return outward.lengthSq() ? outward.normalize() : null;
+  const towardCell = position.clone().normalize();
+  if (outward.lengthSq() === 0) return towardCell;
+  return outward.normalize().add(towardCell).normalize();
+}
+
+function rotateViewToMove(x, y, z, durationMs = null) {
+  if (flipAnimationActive) return;
+  const localDirection = moveFacingDirection(x, y, z);
+  if (!localDirection) return;
+  const currentDirection = localDirection.clone().applyQuaternion(cubeGroup.quaternion).normalize();
+  const viewDirection = camera.position.clone().sub(controls.target).normalize();
+  const turn = new THREE.Quaternion().setFromUnitVectors(currentDirection, viewDirection);
+  const targetQuaternion = turn.multiply(cubeGroup.quaternion.clone());
+  faceTurnAnimation = {
+    from: cubeGroup.quaternion.clone(),
+    to: targetQuaternion,
+    start: performance.now(),
+    duration: durationMs !== null ? durationMs : (opponentMode === 'botvsbot' ? BOT_VS_BOT_FACE_TURN_DURATION : FACE_TURN_DURATION)
+  };
+  startContinuousRendering();
+}
 let flipAnimationStart = 0;
 let flipAnimationStartY = 0;
 const FLIP_ANIMATION_DURATION = 180;
@@ -3874,9 +5345,9 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // O toggles the Classic-only Show Openings control. The shortcut remains
-  // inactive on 3D boards because the opening-name control is not available.
-  if (event.key.toLowerCase() === 'o' && SIZE === 8 && BOARD_DEPTH === 1) {
+  // O toggles the Show Openings control on Classic and (1.35.0) on the cube
+  // boards. It stays inactive on board shapes without an opening book.
+  if (event.key.toLowerCase() === 'o' && boardHasOpeningNames()) {
     bookOpeningsToggle.checked = !bookOpeningsToggle.checked;
     bookOpeningsToggle.dispatchEvent(new Event('change'));
     event.preventDefault();
@@ -3907,6 +5378,16 @@ window.addEventListener('keydown', (event) => {
   // K activates the existing Redo Move button/action.
   if (!isEditableTarget && event.key.toLowerCase() === 'k') {
     redoMove();
+    event.preventDefault();
+    return;
+  }
+
+  // 2.0.9: Bot vs Bot rewind: [ back, ] forward, \ back to Live.
+  if (opponentMode === 'botvsbot' && !event.ctrlKey && !event.metaKey && !event.altKey
+      && (event.key === '[' || event.key === ']' || event.key === '\\')) {
+    if (event.key === '[') rewindStep(-1);
+    else if (event.key === ']') rewindStep(1);
+    else rewindGoLive();
     event.preventDefault();
     return;
   }
@@ -3975,7 +5456,7 @@ window.addEventListener('keydown', (event) => {
         } else {
           autoRotateAnimationActive = false;
           cancelAutoRotateStopTimer();
-          if (!flipAnimationActive) stopContinuousRendering();
+          if (!cameraAnimationActive()) stopContinuousRendering();
         }
         break;
       case '-':
@@ -4020,13 +5501,25 @@ autoRotateToggle.addEventListener('change', () => {
   } else {
     autoRotateAnimationActive = false;
     cancelAutoRotateStopTimer();
-    if (!flipAnimationActive) stopContinuousRendering();
+    if (!cameraAnimationActive()) stopContinuousRendering();
   }
   requestRender();
 });
 
 undoButton.addEventListener('click', undoMove);
 redoButton.addEventListener('click', redoMove);
+// 2.0.9: Bot vs Bot rewind buttons.
+for (const [button, action] of [
+  [rewindBackButton, () => rewindStep(-1)],
+  [rewindForwardButton, () => rewindStep(1)],
+  [rewindLiveButton, rewindGoLive],
+  [boardRewindButton, () => rewindStep(-1)],
+  [boardRewindBackButton, () => rewindStep(-1)],
+  [boardRewindForwardButton, () => rewindStep(1)],
+  [boardRewindLiveButton, rewindGoLive]
+]) {
+  if (button) button.addEventListener('click', (event) => { event.stopPropagation(); action(); });
+}
 moveSequenceButton.addEventListener('click', showMoveSequence);
 loadSequenceButton.addEventListener('click', showLoadSequence);
 startLoadSequenceButton.addEventListener('click', showLoadSequenceFromStartScreen);
@@ -4077,7 +5570,7 @@ bluePulseToggle.addEventListener('change', () => {
       blueOpacityStopTimer = null;
     }
     if (legalSurface) legalSurface.material.opacity = getLegalSurfaceOpacity();
-    if (!autoRotateEnabled && !flipAnimationActive) stopContinuousRendering();
+    if (!autoRotateEnabled && !cameraAnimationActive()) stopContinuousRendering();
   }
   requestRender();
 });
@@ -4103,28 +5596,73 @@ opponentModeInputs.forEach((input) => {
   input.addEventListener('change', updateStartScreenOptions);
 });
 
-botDifficultyInputs.forEach((input) => {
-  input.addEventListener('change', setBotThinkingTimeDefault);
+// 2.0.5: one wiring for the Bot Opponent box and both Bot vs Bot boxes.
+// Picking Easy / Medium / Hard sets the box to that level's default unless
+// Advanced is open and the user has typed their own time.
+[['botDifficulty', botThinkingTimeInput], ['blackBotDifficulty', blackBotThinkingTimeInput], ['whiteBotDifficulty', whiteBotThinkingTimeInput]].forEach(([radioName, input]) => {
+  if (!input) return;
+  input.dataset.difficultyRadio = radioName;
+  document.querySelectorAll(`input[name="${radioName}"]`).forEach((radio) => {
+    radio.addEventListener('change', () => onBotLevelChangedFor(input));
+  });
+  input.addEventListener('input', () => {
+    sanitizeThinkingTimeInput(input);
+    input.dataset.edited = 'true';
+  });
+  input.addEventListener('blur', () => {
+    sanitizeThinkingTimeInput(input);
+    if (input.value === '') setThinkingTimeDefaultFor(input, radioName);
+  });
+  setThinkingTimeDefaultFor(input, radioName);
 });
-
-if (botThinkingTimeInput) {
-  botThinkingTimeInput.addEventListener('input', sanitizeBotThinkingTimeInput);
-  botThinkingTimeInput.addEventListener('blur', () => {
-    sanitizeBotThinkingTimeInput();
-    if (botThinkingTimeInput.value === '') setBotThinkingTimeDefault();
+// 2.0.5: Bot vs Bot setup legends read e.g. "Bot 1 (Hard 1.1s), Black in game 1".
+function updateBotVsBotLegends() {
+  [['black', blackBotThinkingTimeInput, 1, 'Black'], ['white', whiteBotThinkingTimeInput, 2, 'White']].forEach(([color, input, number, first]) => {
+    const legend = document.getElementById(`${color}BotLegend`);
+    if (!legend) return;
+    const difficulty = document.querySelector(`input[name="${color}BotDifficulty"]:checked`)?.value || 'hard';
+    const thinkingTimeMs = isThinkingTimeAdvancedOpen(input) && thinkingTimeMsFromInput(input) !== null
+      ? thinkingTimeMsFromInput(input) : levelDefaultThinkingTimeMs(difficulty);
+    const name = document.createElement('span');
+    name.className = 'bot-legend-name';
+    name.textContent = `${botVsBotDescribe({ difficulty, thinkingTimeMs }, number)},`;
+    const colour = document.createElement('span');
+    colour.className = 'bot-legend-colour';
+    colour.textContent = `${first} in game 1`;
+    legend.replaceChildren(name, ' ', colour);
   });
 }
+['blackBotDifficulty', 'whiteBotDifficulty'].forEach((name) => {
+  document.querySelectorAll(`input[name="${name}"]`).forEach((radio) => radio.addEventListener('change', updateBotVsBotLegends));
+});
+[blackBotThinkingTimeInput, whiteBotThinkingTimeInput].forEach((input) => {
+  input?.addEventListener('input', updateBotVsBotLegends);
+  input?.addEventListener('blur', updateBotVsBotLegends);
+});
+document.querySelectorAll('.advanced-toggle').forEach((button) => {
+  button.addEventListener('click', updateBotVsBotLegends);
+  button.addEventListener('click', () => {
+    setThinkingTimeAdvancedOpen(button, button.getAttribute('aria-expanded') !== 'true');
+    updateBotVsBotLegends();
+  });
+});
+updateBotVsBotLegends();
+botVsBotPauseButton?.addEventListener('click', toggleBotVsBotPause);
+boardPauseButton?.addEventListener('click', toggleBotVsBotPause);
+botVsBotStopButton?.addEventListener('click', stopBotVsBotCountdown);
 
 developerModeToggle.addEventListener('change', () => {
   developerMode = developerModeToggle.checked;
   updateBotDeveloperPanel();
 });
 bookOpeningsToggle.addEventListener('change', () => {
-  if (SIZE !== 8 || BOARD_DEPTH !== 1) return;
+  // 1.35.1: Name Openings applies to Classic and to the cube boards, so the
+  // toggle (and the O key, which dispatches this event) must work on all of them.
   bookOpeningsEnabled = bookOpeningsToggle.checked;
   updateBookOpeningLabel();
 });
 copyBotDeveloperButton.addEventListener('click', copyBotDeveloperSummary);
+document.getElementById('copyDubButton')?.addEventListener('click', copyDubExport);
 startGameButton.addEventListener('click', startGameFromSplash);
 resetButton.addEventListener('click', resetGame);
 brandTitle.addEventListener('click', resetGame);
@@ -4142,12 +5680,25 @@ resignConfirmOverlay.addEventListener('click', (event) => {
   if (event.target === resignConfirmOverlay) hideResignConfirmation();
 });
 
+// 2.0.2: keep the scene background in step with the phone media query.
+function applySceneBackground() {
+  const color = sceneBackgroundColor();
+  if (scene.background.getHex() === color) return;
+  scene.background.setHex(color);
+  renderer.setClearColor(color, 1);
+  requestRender();
+}
+if (phoneBackgroundQuery.addEventListener) phoneBackgroundQuery.addEventListener('change', applySceneBackground);
+else if (phoneBackgroundQuery.addListener) phoneBackgroundQuery.addListener(applySceneBackground);
+
 window.addEventListener('resize', () => {
+  applySceneBackground();
   const width = sceneElement.clientWidth;
   const height = sceneElement.clientHeight;
 
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+  applyPhoneBoardViewOffset();
   renderer.setSize(width, height);
   updateOrientationMarkerVisibility();
   requestRender();
@@ -4189,7 +5740,12 @@ function animate(now) {
       flipAnimationActive = false;
       cubeGroup.rotation.y = flipAnimationStartY + Math.PI;
     }
-  } else if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube) {
+  } else if (faceTurnAnimation) {
+    const t = Math.min((now - faceTurnAnimation.start) / faceTurnAnimation.duration, 1);
+    const easedT = t * t * (3 - 2 * t);
+    cubeGroup.quaternion.slerpQuaternions(faceTurnAnimation.from, faceTurnAnimation.to, easedT);
+    if (t >= 1) faceTurnAnimation = null;
+  } else if (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube && !botVsBotViewHeld()) {
     // Auto-Rotate uses the established motion settings.
     const frameScale = elapsedSeconds * 60;
     cubeGroup.rotation.y += 0.003 * frameScale;
@@ -4209,7 +5765,7 @@ function animate(now) {
 
   renderScene();
 
-  if (!flipAnimationActive && !blueOpacityAnimationActive && (!autoRotateEnabled || !autoRotateAnimationActive || hoveringOverCube)) {
+  if (!cameraAnimationActive() && !blueOpacityAnimationActive && (!autoRotateEnabled || !autoRotateAnimationActive || hoveringOverCube || botVsBotViewHeld())) {
     stopContinuousRendering();
   }
 }
@@ -4218,3 +5774,28 @@ updateUndoButton();
 updateRedoButton();
 updateVersionLabel();
 requestRender();
+
+
+// 2.0.4: phone controls drawer handle. Dragging the handle up scrolls the
+// page natively (touch-action: pan-y), exactly like before but with a much
+// larger target; a tap opens the drawer (scrolls the controls into view) and
+// a tap while open closes it (back to the top). Hidden on desktop.
+if (controlsHandleElement) {
+  const controlsDrawerIsOpen = () => window.scrollY > 24;
+  const updateControlsHandleState = () => {
+    const open = controlsDrawerIsOpen();
+    controlsHandleElement.classList.toggle('open', open);
+    controlsHandleElement.setAttribute('aria-expanded', String(open));
+    controlsHandleElement.setAttribute('aria-label', open ? 'Hide options' : 'Show options');
+  };
+  controlsHandleElement.addEventListener('click', () => {
+    if (controlsDrawerIsOpen()) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      window.scrollTo({ top: maxScroll, behavior: 'smooth' });
+    }
+  });
+  window.addEventListener('scroll', updateControlsHandleState, { passive: true });
+  updateControlsHandleState();
+}

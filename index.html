@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="Play Cube Reversi in your browser on 4×4×4, 6×6×6, and 8×8×8 3D boards, or play Classic 8×8 Reversi against another player or the AI Bot.">
-  <title>Cube Reversi</title>
-  <link rel="stylesheet" href="CubeReversi.css?v=1.33.1">
+  <title>Cube Reversi – 3D Reversi Game</title>
+  <link rel="stylesheet" href="CubeReversi.css?v=2.0.9">
   <link rel="icon" type="image/png" href="CubeReversiIcon.png">
   <link rel="canonical" href="https://cubereversi.com/">
   <meta property="og:title" content="Cube Reversi">
@@ -20,6 +20,10 @@
   <meta name="twitter:image" content="https://cubereversi.com/CubeReversiSocial.png">
 </head>
 <body>
+  <!-- 2.0.3: phone-only solid strip at the top edge. iOS 26 Safari fills the
+       status bar with the colour of a fixed element touching it, so scrolled
+       header text no longer shows through behind the clock and battery. -->
+  <div id="statusBarShield" aria-hidden="true"></div>
   <div id="startOverlay" aria-hidden="false">
     <div id="startPanel" role="dialog" aria-modal="true" aria-labelledby="startTitle">
       <img class="start-logo" src="CubeReversiIcon.png" alt="Cube Reversi logo">
@@ -38,6 +42,31 @@
             <input type="radio" name="opponentMode" value="bot" checked>
             <span>Bot Opponent</span>
           </label>
+          <label class="start-option">
+            <input type="radio" name="opponentMode" value="botvsbot">
+            <span>Bot vs Bot</span>
+          </label>
+        </fieldset>
+
+        <fieldset id="blackBotFieldset" class="start-fieldset bot-vs-bot-fieldset start-hidden" hidden>
+          <legend id="blackBotLegend"><span class="bot-legend-name">Bot 1 (Hard 1.1s),</span> <span class="bot-legend-colour">Black in game 1</span></legend>
+          <label class="start-option">
+            <input type="radio" name="blackBotDifficulty" value="easy">
+            <span>Easy</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="blackBotDifficulty" value="medium">
+            <span>Medium</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="blackBotDifficulty" value="hard" checked>
+            <span>Hard</span>
+          </label>
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="blackBotThinkingTimeRow" data-advanced-for="blackBotThinkingTime">Advanced</button>
+          <div id="blackBotThinkingTimeRow" class="bot-thinking-time-row" hidden>
+            <label for="blackBotThinkingTime">Thinking Time</label>
+            <input id="blackBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 1 thinking time in seconds">
+          </div>
         </fieldset>
 
         <fieldset id="colorFieldset" class="start-fieldset">
@@ -95,9 +124,30 @@
             <input type="radio" name="botDifficulty" value="hard">
             <span>Hard</span>
           </label>
-          <div class="bot-thinking-time-row">
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="botThinkingTimeRow" data-advanced-for="botThinkingTime">Advanced</button>
+          <div id="botThinkingTimeRow" class="bot-thinking-time-row" hidden>
             <label for="botThinkingTime">Thinking Time</label>
-            <input id="botThinkingTime" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="0.7" aria-label="Bot thinking time in seconds">
+            <input id="botThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="0.7" aria-label="Bot thinking time in seconds">
+          </div>
+        </fieldset>
+        <fieldset id="whiteBotFieldset" class="start-fieldset bot-vs-bot-fieldset start-hidden" hidden>
+          <legend id="whiteBotLegend"><span class="bot-legend-name">Bot 2 (Hard 1.1s),</span> <span class="bot-legend-colour">White in game 1</span></legend>
+          <label class="start-option">
+            <input type="radio" name="whiteBotDifficulty" value="easy">
+            <span>Easy</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="whiteBotDifficulty" value="medium">
+            <span>Medium</span>
+          </label>
+          <label class="start-option">
+            <input type="radio" name="whiteBotDifficulty" value="hard" checked>
+            <span>Hard</span>
+          </label>
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="whiteBotThinkingTimeRow" data-advanced-for="whiteBotThinkingTime">Advanced</button>
+          <div id="whiteBotThinkingTimeRow" class="bot-thinking-time-row" hidden>
+            <label for="whiteBotThinkingTime">Thinking Time</label>
+            <input id="whiteBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 2 thinking time in seconds">
           </div>
         </fieldset>
       </div>
@@ -121,7 +171,10 @@
         <button id="startGameButton" type="button" autofocus>Start Game</button>
       </div>
       <a class="start-menu-feedback" href="mailto:feedback@cubereversi.com?subject=Cube%20Reversi%20Feedback">feedback@cubereversi.com</a>
-      <div class="start-menu-version">Version 1.33.1</div>
+      <div class="start-menu-footer">
+        <div class="start-menu-version">Version 2.0.9</div>
+        <a class="start-menu-opening-book" href="CubeReversi_Opening_Book.pdf" target="_blank" rel="noopener">Opening Book (PDF)</a>
+      </div>
     </div>
   </div>
       <div id="loadedSequenceChoiceOverlay" aria-hidden="true">
@@ -184,7 +237,12 @@
       </div>
     </div>
     <div class="status-panel">
-      <div id="turnLabel" class="turn-status"><span id="playingAsLabel" class="playing-as">Playing As: Black</span><span id="turnText">Black's turn</span><span id="turnMoveCount" class="turn-move-count">Legal moves: 0</span></div>
+      <!-- 2.0.9: the Bot vs Bot tally is the last line of the centre block (green,
+           same size as the turn text); in Bot vs Bot that line is always present. -->
+      <!-- 2.0.6: the Bot vs Bot next-game countdown shares the Available moves line
+           in the centre block (that line is empty once a game is complete) and
+           the line is always reserved, so the header never changes height. -->
+      <div id="turnLabel" class="turn-status"><span id="playingAsLabel" class="playing-as">Playing As: Black</span><span id="turnText">Black's turn</span><span class="turn-detail-line"><span id="turnMoveCount" class="turn-move-count">0 Available moves</span><span id="botVsBotCountdownLabel" class="bot-vs-bot-countdown" aria-live="polite" hidden></span></span><span id="botVsBotTallyLabel" class="bot-vs-bot-tally" hidden></span></div>
       <span id="scoreLabel" class="score-summary">Black 4 · White 4</span>
       <span id="emptySpacesLabel">Spaces Remaining: 56</span>
       <span id="botDifficultyLabel" class="bot-difficulty-label" aria-live="polite"></span>
@@ -199,6 +257,22 @@
     <section id="game">
       <div id="scene" aria-label="Three-dimensional Cube Reversi board"></div>
       <img id="botThinkingIndicator" src="ReversiThinking.webp" alt="Bot thinking" hidden>
+      <!-- 2.0.4: on-board Pause/Resume for Bot vs Bot (mirrors the controls-panel button). -->
+      <button id="boardPauseButton" class="board-pause-button" type="button" hidden aria-pressed="false" aria-label="Pause Bot vs Bot" title="Pause">
+        <span class="board-pause-icon" aria-hidden="true"></span>
+      </button>
+      <!-- 2.0.9: Bot vs Bot rewind. The round button (left of Pause) steps back one
+           move and pauses the Bots; while rewinding, the bar shows Move N of M with
+           Back / Forward / Live. -->
+      <button id="boardRewindButton" class="board-rewind-button" type="button" hidden aria-label="Rewind: step back one move" title="Rewind ( [ )">
+        <span class="board-rewind-icon" aria-hidden="true"></span>
+      </button>
+      <div id="boardRewindBar" class="board-rewind-bar" role="group" aria-label="Rewind" hidden>
+        <button id="boardRewindBackButton" type="button" aria-label="Back one move" title="Back ( [ )">&#9664;</button>
+        <span id="boardRewindLabel" class="board-rewind-label" aria-live="polite"></span>
+        <button id="boardRewindForwardButton" type="button" aria-label="Forward one move" title="Forward ( ] )">&#9654;</button>
+        <button id="boardRewindLiveButton" class="board-rewind-live" type="button" aria-label="Back to the live game" title="Live ( \ )">Live</button>
+      </div>
       <div id="bookOpeningLabel" class="book-opening-label" aria-live="polite" hidden></div>
       <div id="coordinateAxes" aria-label="Cube coordinate axes"></div>
       <div id="coordinateReadout" aria-live="polite"></div>
@@ -214,7 +288,7 @@
           <p><strong>. / /:</strong> Roll</p>
           <p><strong>V:</strong> Flip 180°</p>
           <p><strong>R:</strong> Reset View</p>
-          <p id="classicOpeningsHelp"><strong>O:</strong> Show Openings</p>
+          <p id="classicOpeningsHelp"><strong>O:</strong> Name Openings on/off</p>
           <p><strong>Spacebar:</strong> Pause Rotation</p>
           <p id="threeAxisHelp"><strong>T:</strong> 3-Axis</p>
           <p><strong>L:</strong> Wireframe</p>
@@ -223,7 +297,10 @@
           <p><strong>P:</strong> Pulse</p>
           <p><strong>M:</strong> Undo</p>
           <p><strong>K:</strong> Redo</p>
+          <p><strong>[ / ]:</strong> Rewind Back / Forward (Bot vs Bot)</p>
+          <p><strong>\:</strong> Rewind: back to Live (Bot vs Bot)</p>
           <p><strong>N:</strong> New Game</p>
+          <p class="help-opening-book"><a href="CubeReversi_Opening_Book.pdf" target="_blank" rel="noopener">Opening Book (PDF)</a></p>
         </div>
       </div>
       <div id="sequenceOverlay" aria-hidden="true">
@@ -267,6 +344,11 @@
     </section>
 
     <div class="controls-shell">
+      <!-- 2.0.4: phone-only pull-up handle for the controls drawer (hidden on desktop). -->
+      <button id="controlsHandle" type="button" aria-label="Show options" aria-expanded="false">
+        <span class="controls-handle-pill" aria-hidden="true"></span>
+        <span class="controls-handle-label" aria-hidden="true"><span class="controls-handle-chevron"></span>Options</span>
+      </button>
     <aside class="controls">
   <label class="toggle-control" for="bookOpeningsToggle">
     <input id="bookOpeningsToggle" type="checkbox" checked>
@@ -299,6 +381,9 @@
   <div class="history-actions">
     <button id="undoButton" type="button" disabled>Undo Move</button>
     <button id="redoButton" type="button" disabled>Redo Move</button>
+    <button id="rewindBackButton" class="rewind-button" type="button" hidden disabled aria-label="Rewind back one move">&#9664; Back</button>
+    <button id="rewindForwardButton" class="rewind-button" type="button" hidden disabled aria-label="Rewind forward one move">Forward &#9654;</button>
+    <button id="rewindLiveButton" class="rewind-button" type="button" hidden disabled aria-label="Back to the live game">Live</button>
   </div>
   <div class="sequence-actions">
     <button id="moveSequenceButton" type="button">Move Sequence</button>
@@ -306,12 +391,17 @@
   </div>
   <div class="final-actions">
     <button id="resignButton" type="button">Resign</button>
+    <button id="botVsBotPauseButton" type="button" hidden aria-pressed="false">Pause</button>
+    <button id="botVsBotStopButton" type="button" hidden title="Stop the automatic next game">Stop</button>
     <button id="resetButton" type="button">New Game</button>
   </div>
   <section id="botDeveloperPanel" class="bot-developer-panel" hidden aria-labelledby="botDeveloperTitle">
     <h2 id="botDeveloperTitle">Bot Summary</h2>
     <textarea id="botDeveloperOutput" readonly spellcheck="false" aria-label="Bot search summary"></textarea>
-    <button id="copyBotDeveloperButton" type="button">Copy Bot Summary</button>
+    <div class="bot-developer-actions">
+      <button id="copyBotDeveloperButton" type="button">Copy Bot Summary</button>
+      <button id="copyDubButton" type="button" title="Copy header, summary and full move list in the machine-readable CUBEREVERSI-DUB v1 format">Copy for dub</button>
+    </div>
   </section>
     </aside>
     </div>
@@ -326,6 +416,6 @@
     }
   }
   </script>
-  <script type="module" src="CubeReversi.js?v=1.33.1"></script>
+  <script type="module" src="CubeReversi.js?v=2.0.9"></script>
 </body>
 </html>
