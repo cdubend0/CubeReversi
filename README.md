@@ -11,6 +11,8 @@ The current version is 2.0.9. The live game is at https://cubereversi.com.
 
 Download the repository and open index.html in a web browser.
 
+Browsers block the game's scripts when index.html is opened directly from a file, so serve it from a simple local web server: in the repository folder, run `python3 -m http.server`, then open http://localhost:8000. The 3D view needs an internet connection, because three.js loads from unpkg.
+
 CubeReversi.js is the authoritative game controller. It manages game state, rules, legal moves, board interaction, rendering, and move commitment.
 
 CubeReversiBot.js contains the Bot engine. The Bot evaluates the current position and selects a move, while the game controller remains responsible for actually committing that move to the game state.
