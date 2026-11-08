@@ -2,7 +2,7 @@
 
 A browser-based 3D implementation of the classic game Reversi played on a cube, supporting 4x4x4, 6x6x6, and 8x8x8 boards, along with a dedicated Classic 8x8 mode and a Bot opponent.
 
-The current version is 2.0.9. The live game is at https://cubereversi.com.
+The current version is 2.0.19. The live game is at https://cubereversi.com.
 
 
 
@@ -45,6 +45,10 @@ CubeReversiBot.js contains the Bot engine. The Bot evaluates the current positio
 - Multiple board and display controls
 - Browser-based implementation with no installation required
 - Open-source, feedback and contributions welcome
+- Bot vs Bot batch runner
+- Shade
+- Green Cubes, Blue Cubes, and Pulse remembered between visits
+- Medium defaults to fixed depth 3; Hard and Bot vs Bot default to fixed depth 5
 
 
 
@@ -64,7 +68,7 @@ AI-generated suggestions were reviewed, tested, modified, and integrated by the 
 
 AI systems used during development include:
 OpenAI ChatGPT — primary assistance for the earlier versions.
-Grok Bot, an AI assistant — later versions (through 2.0.9). Grok Bot used Cursor cloud agents for coding and commits. This covered the 3D cube opening book, the study PDF, Bot vs Bot, bot level tuning and self-play testing, and UI updates.
+Grok Bot, an AI assistant — later versions (through 2.0.19). Grok Bot used Cursor cloud agents for coding and commits. This covered the 3D cube opening book, the study PDF, Bot vs Bot, bot level tuning and self-play testing, and UI updates.
 
 
 

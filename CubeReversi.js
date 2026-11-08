@@ -1,4 +1,6 @@
-import { chooseMove, recognizeCubeOpening } from './CubeReversiBot.js?v=2.0.9';
+import { APP_VERSION } from './version.js?v=2.0.19';
+import { chooseMove, recognizeCubeOpening, ENGINE_VERSION, OPENING_BOOK_ID, resetCubeSearchTables } from './CubeReversiBot.js?v=2.0.19';
+import { saveBatch, saveGame, newId, bookUsage, mountBatchController, captureDeviceProfile, resolvedBoardDepth } from './CubeReversiBatch.js?v=2.0.19';
 import * as THREE from 'three';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 
@@ -152,9 +154,82 @@ const closeSequenceButton = document.getElementById('closeSequenceButton');
 const autoRotateToggle = document.getElementById('autoRotateToggle');
 const show3AxisToggle = document.getElementById('show3AxisToggle');
 const bluePulseToggle = document.getElementById('bluePulseToggle');
+const shadeMoon = document.getElementById('shadeMoon');
 const blueCubesToggle = document.getElementById('blueCubesToggle');
 const showWireframeToggle = document.getElementById('showWireframeToggle');
 const hideGreenCubesToggle = document.getElementById('hideGreenCubesToggle');
+
+// 2.0.19: Green Cubes, Blue Cubes, and Pulse are remembered like Shade
+// (cubereversi.shade). These are the player's choices. Game Complete may
+// check Green Cubes so the finished position is visible; that temporary
+// reveal must not be written here. A new game copies these choices back.
+const GREEN_CUBES_STORAGE_KEY = 'cubereversi.greenCubes';
+const BLUE_CUBES_STORAGE_KEY = 'cubereversi.blueCubes';
+const PULSE_STORAGE_KEY = 'cubereversi.pulse';
+let preferredGreenCubes = false;
+let preferredBlueCubes = false;
+let preferredPulse = false;
+
+function readStoredFlag(key) {
+  try {
+    const value = localStorage.getItem(key);
+    if (value === '1') return true;
+    if (value === '0') return false;
+  } catch (error) {}
+  return null;
+}
+
+function writeStoredFlag(key, enabled) {
+  try { localStorage.setItem(key, enabled ? '1' : '0'); } catch (error) {}
+}
+
+function rememberGreenCubes(enabled) {
+  preferredGreenCubes = !!enabled;
+  writeStoredFlag(GREEN_CUBES_STORAGE_KEY, preferredGreenCubes);
+}
+
+function rememberBlueCubes(enabled) {
+  preferredBlueCubes = !!enabled;
+  writeStoredFlag(BLUE_CUBES_STORAGE_KEY, preferredBlueCubes);
+}
+
+function rememberPulse(enabled) {
+  preferredPulse = !!enabled;
+  writeStoredFlag(PULSE_STORAGE_KEY, preferredPulse);
+}
+
+function syncPulseControlVisibility() {
+  const blueOn = blueCubesToggle.checked;
+  document.body.classList.toggle('pulse-control-hidden', !blueOn);
+  const pulseControl = bluePulseToggle.closest('label');
+  if (pulseControl) pulseControl.hidden = !blueOn;
+}
+
+function loadCubeDisplayPreferences() {
+  const green = readStoredFlag(GREEN_CUBES_STORAGE_KEY);
+  const blue = readStoredFlag(BLUE_CUBES_STORAGE_KEY);
+  const pulse = readStoredFlag(PULSE_STORAGE_KEY);
+  // No saved key: keep the HTML default (unchecked) rather than inventing one.
+  preferredGreenCubes = green === null ? hideGreenCubesToggle.checked : green;
+  preferredBlueCubes = blue === null ? blueCubesToggle.checked : blue;
+  preferredPulse = pulse === null ? bluePulseToggle.checked : pulse;
+  hideGreenCubesToggle.checked = preferredGreenCubes;
+  blueCubesToggle.checked = preferredBlueCubes;
+  bluePulseToggle.checked = preferredPulse;
+  syncPulseControlVisibility();
+}
+
+function applyPreferredCubeDisplay() {
+  hideGreenCubesToggle.checked = preferredGreenCubes;
+  if (occupiedSurface) occupiedSurface.visible = preferredGreenCubes;
+  blueCubesToggle.checked = preferredBlueCubes;
+  if (legalSurface) legalSurface.visible = preferredBlueCubes;
+  bluePulseToggle.checked = preferredPulse;
+  updatePulseControlAvailability();
+}
+
+loadCubeDisplayPreferences();
+
 const moveEntry = document.getElementById('moveEntry');
 const moveCoordinateInput = document.getElementById('moveCoordinate');
 
@@ -297,14 +372,23 @@ mainOrientationMarker.position.set(
 );
 cubeGroup.add(mainOrientationMarker);
 
+// 2.0.10: 3-Axis is one switch for all orientation aids. Checked shows the
+// colored main-cube edges, the green A-1-W sphere and the lower-left
+// synchronized mini cube with its coordinate readout; unchecked hides them.
+// Classic 8x8x1 has no 3-Axis control, so it keeps the 2.0.9 look (green
+// sphere and mini cube shown, no edges). Phones always hide the sphere and
+// mini cube (CSS @media rule for the mini cube).
 function update3AxisVisibility() {
   const show3Axis = show3AxisToggle.checked;
+  const isClassicBoard = BOARD_DEPTH === 1;
   orientationEdges.visible = show3Axis;
+  document.body.classList.toggle('mini-cube-hidden', !show3Axis && !isClassicBoard);
 }
 
 function updateOrientationMarkerVisibility() {
   const show3Axis = show3AxisToggle.checked;
-  mainOrientationMarker.visible = !isMobileViewport() && !show3Axis;
+  const isClassicBoard = BOARD_DEPTH === 1;
+  mainOrientationMarker.visible = !isMobileViewport() && (show3Axis || isClassicBoard);
   update3AxisVisibility();
 }
 
@@ -320,6 +404,8 @@ function updateHelpKeyAvailability() {
   if (threeAxisHelp) threeAxisHelp.hidden = isClassic;
 }
 
+let last3AxisBoardWasClassic = false;
+
 function update3AxisControlAvailability() {
   const threeAxisControl = show3AxisToggle.closest('label');
   const isClassic = BOARD_DEPTH === 1;
@@ -333,6 +419,12 @@ function update3AxisControlAvailability() {
   if (isClassic && show3AxisToggle.checked) {
     show3AxisToggle.checked = false;
   }
+  // 2.0.10: 3-Axis defaults to checked. Leaving Classic (where it is forced
+  // off) restores that default.
+  if (!isClassic && last3AxisBoardWasClassic) {
+    show3AxisToggle.checked = show3AxisToggle.defaultChecked;
+  }
+  last3AxisBoardWasClassic = isClassic;
   updateOrientationMarkerVisibility();
   updateHelpKeyAvailability();
 }
@@ -470,7 +562,7 @@ document.addEventListener('visibilitychange', () => {
     blueOpacityAnimationActive = false;
     autoRotateAnimationActive = false;
     if (legalSurface) {
-      legalSurface.material.opacity = bluePulseToggle.checked
+      legalSurface.material.opacity = bluePulseActive()
         ? BLUE_OPACITY_IDLE
         : getLegalSurfaceOpacity();
     }
@@ -746,6 +838,13 @@ let humanPlayer = BLACK;
 let gameDuration = '5';
 let botDifficulty = 'medium';
 let developerMode = false;
+// 2.0.12: Bot Summary starts checked in Bot vs Bot (and therefore for Batch).
+// A click on the box keeps the player's choice after that.
+let developerModeTouched = false;
+// Snapshot of the splash search choice for the game that is running.
+// The radios themselves stay put, the same way difficulty and thinking time do.
+let splashSearchMode = 'depth';
+let humanBotFixedDepth = null;
 let bookOpeningsEnabled = true;
 let botDeveloperEntries = [];
 let botDeveloperGameStartedAt = null;
@@ -788,6 +887,10 @@ let botVsBotBots = {
   B: { difficulty: 'hard', thinkingTimeMs: 1100 }
 };
 let botVsBotGameIndex = 0; // 0-based game number within the session
+// 2.0.11: one trace per live Bot vs Bot game, archived when the game ends.
+let liveBotTrace = null;
+let suppressLiveArchive = false;
+let batchReplayActive = false;
 let botVsBotSettings = { [BLACK]: botVsBotBots.A, [WHITE]: botVsBotBots.B };
 // 2.0.1: running tally for the current Bot vs Bot session (reset whenever a
 // Bot vs Bot session is started from the Start Menu, i.e. whenever the board
@@ -979,7 +1082,25 @@ function armBotVsBotPassTimer() {
   }, BOT_VS_BOT_PASS_DISPLAY_MS);
 }
 
+// 2.0.10: the coordinate entry box (Move: [____] Play) is only for a human
+// player. It is hidden whenever both sides are Bots and shown again in any
+// mode with a human player. A body class drives the CSS so every path that
+// changes opponentMode (Start Menu, New Game, loaded sequence, page load)
+// ends up here via updateBotVsBotPauseButton()/updateStatus().
+function updateMoveEntryVisibility() {
+  const isBotVsBot = opponentMode === 'botvsbot';
+  document.body.classList.toggle('bot-vs-bot-mode', isBotVsBot);
+  if (moveEntry) moveEntry.setAttribute('aria-hidden', isBotVsBot ? 'true' : 'false');
+  if (moveCoordinateInput) {
+    moveCoordinateInput.disabled = isBotVsBot;
+    if (isBotVsBot && document.activeElement === moveCoordinateInput) moveCoordinateInput.blur();
+  }
+  const moveEntryButton = moveEntry ? moveEntry.querySelector('#moveButton') : null;
+  if (moveEntryButton) moveEntryButton.disabled = isBotVsBot;
+}
+
 function updateBotVsBotPauseButton() {
+  updateMoveEntryVisibility();
   const isBotVsBot = opponentMode === 'botvsbot';
   const countdownRunning = isBotVsBot && gameCompleteActive && botVsBotCountdown !== null && !botVsBotCountdown.stopped;
   const paused = countdownRunning ? botVsBotCountdown.paused : botVsBotPaused;
@@ -1141,7 +1262,7 @@ function startNextBotVsBotGame() {
   gameInProgress = true;
   resetBoardForNewGame();
   initializeGameClock();
-  createBotWorker();
+  startBotWorkerFresh();
   botVsBotPaused = false;
   botVsBotLastMoveAt = performance.now();
   keepBotVsBotAutoRotating();
@@ -1176,6 +1297,7 @@ function recordBotVsBotResult(black, white) {
     }
   }
   updateBotDeveloperPanel();
+  if (!suppressLiveArchive && liveBotTrace) archiveLiveBotVsBotGame(black, white);
 }
 
 // 2.0.5: Bot A plays Black in odd-numbered games (1, 3, ...), Bot B in even.
@@ -1194,6 +1316,7 @@ function assignBotVsBotColours() {
 // e.g. "Bot 1 (Hard 1.1s)"; short=true abbreviates Medium for phones.
 function botVsBotDescribe(bot, number, short = false) {
   const level = short && bot.difficulty === 'medium' ? 'Med' : capitalizeDifficulty(bot.difficulty);
+  if (bot.fixedDepth) return `Bot ${number} (${level} d${bot.fixedDepth})`;
   return `Bot ${number} (${level} ${(bot.thinkingTimeMs / 1000).toFixed(1)}s)`;
 }
 
@@ -1208,13 +1331,14 @@ function botVsBotKeyFor(player) {
 
 function botVsBotTallyText() {
   const t = botVsBotTally;
-  return `Games ${t.games} · Bot 1 ${t.a}, Bot 2 ${t.b}, Draws ${t.draws}`;
+  // 2.0.10: hyphen between each Bot and its score.
+  return `Games ${t.games} · Bot 1 - ${t.a}, Bot 2 - ${t.b}, Draws ${t.draws}`;
 }
 
 // 2.0.2: compact phone version of the tally (shown by CSS at max-width 760px).
 function botVsBotTallyShortText() {
   const t = botVsBotTally;
-  return `Bot 1 ${t.a}, Bot 2 ${t.b}, Draws ${t.draws}`;
+  return `Bot 1 - ${t.a}, Bot 2 - ${t.b}, Draws ${t.draws}`;
 }
 
 // 2.0.2: fill a header label with a full (desktop) and a short (phone) form.
@@ -1471,7 +1595,7 @@ function getCornerPosition(move, player) {
 // in the controller from the board and the engine's existing search stats; the
 // engine itself is unchanged.
 // -----------------------------------------------------------------------------
-const SUMMARY_VERSION = '2.0.9';
+const SUMMARY_VERSION = APP_VERSION;
 const SUMMARY_TERMINAL_SCORE = 999000;
 
 function summaryIsCorner(x, y, z) {
@@ -1734,9 +1858,13 @@ function updateBotDeveloperPanel() {
   const lines = [
     `Cube Reversi Bot Developer Summary`,
     `Version: ${SUMMARY_VERSION}`,
+    `Engine: ${ENGINE_VERSION}`,
+    `Opening book: ${OPENING_BOOK_ID}`,
     `Board: ${info.boardLabel}`,
     `Difficulty: ${botDifficulty.charAt(0).toUpperCase()}${botDifficulty.slice(1)}`,
-    `Thinking time: ${info.thinking.text}`,
+    splashSearchMode === 'depth'
+      ? `Search: Fixed depth ${humanBotFixedDepth}`
+      : `Thinking time: ${info.thinking.text}`,
     `Bot colour: ${info.botColor}`,
     `Score: Black ${info.score.black} · White ${info.score.white} — ${info.result.text}`,
     `Browser: ${navigator.userAgent}`,
@@ -1869,6 +1997,8 @@ function buildDubExport() {
     '#CUBEREVERSI-DUB v1',
     '[HEADER]',
     `version=${SUMMARY_VERSION}`,
+    `engine=${ENGINE_VERSION}`,
+    `opening_book=${OPENING_BOOK_ID}`,
     `board=${info.boardCode}`,
     `size=${SIZE}`,
     `depth=${BOARD_DEPTH}`,
@@ -1880,8 +2010,11 @@ function buildDubExport() {
       `bot2=${clean(botVsBotName('B'))}`,
       `bot1_difficulty=${botVsBotBots.A.difficulty}`,
       `bot1_thinking_ms=${botVsBotBots.A.thinkingTimeMs}`,
+      `bot1_fixed_depth=${botVsBotBots.A.fixedDepth ?? '-'}`,
       `bot2_difficulty=${botVsBotBots.B.difficulty}`,
       `bot2_thinking_ms=${botVsBotBots.B.thinkingTimeMs}`,
+      `bot2_fixed_depth=${botVsBotBots.B.fixedDepth ?? '-'}`,
+      `search_mode=${splashSearchMode}`,
       `black_bot=${botVsBotBlackKey() === 'A' ? 'bot1' : 'bot2'}`,
       `white_bot=${botVsBotBlackKey() === 'A' ? 'bot2' : 'bot1'}`,
       `session_games=${botVsBotTally.games}`,
@@ -1892,6 +2025,8 @@ function buildDubExport() {
       `difficulty=${botDifficulty}`,
       `thinking_ms=${info.thinking.ms ?? '-'}`,
       `thinking_setting=${info.thinking.ms === null ? '-' : (info.thinking.isDefault ? 'default' : 'custom')}`,
+      `search_mode=${splashSearchMode}`,
+      `fixed_depth=${splashSearchMode === 'depth' ? (humanBotFixedDepth ?? '-') : '-'}`,
       `bot_color=${info.botColor.toUpperCase()}`,
       `human_color=${info.botColor === 'White' ? 'BLACK' : 'WHITE'}`
     ]),
@@ -2091,8 +2226,11 @@ function updateBotVsBotDeveloperPanel() {
   const lines = [
     'Cube Reversi Bot Summary — Bot vs Bot',
     `Version: ${SUMMARY_VERSION}`,
+    `Engine: ${ENGINE_VERSION}`,
+    `Opening book: ${OPENING_BOOK_ID}`,
     `Board: ${info.boardLabel}`,
     `Game ${botVsBotGameIndex + 1}: ${botVsBotName(blackKey)} Black vs ${botVsBotName(whiteKey)} White`,
+    `Search: ${splashSearchMode === 'depth' ? 'Fixed depth' : 'Time limit'}`,
     `Score: Black ${info.score.black} · White ${info.score.white} — ${info.result.text}`,
     `Session: ${botVsBotTallyText()}`,
     `Browser: ${navigator.userAgent}`,
@@ -2185,11 +2323,15 @@ function createBotWorker() {
     return null;
   }
 
-  const botModuleUrl = new URL('./CubeReversiBot.js?v=2.0.9', import.meta.url).href;
+  const botModuleUrl = new URL('./CubeReversiBot.js?v=2.0.19', import.meta.url).href;
   const workerSource = `
-    import { chooseMove } from ${JSON.stringify(botModuleUrl)};
+    import { chooseMove, resetCubeSearchTables } from ${JSON.stringify(botModuleUrl)};
     self.onmessage = (event) => {
       const data = event.data || {};
+      if (data.type === 'reset') {
+        resetCubeSearchTables();
+        return;
+      }
       if (data.type !== 'chooseMove') return;
       const startedAt = performance.now();
       try {
@@ -2200,7 +2342,8 @@ function createBotWorker() {
           requestId: data.requestId,
           move,
           elapsedMs,
-          searchStats: chooseMove.lastSearchStats || {}
+          searchStats: chooseMove.lastSearchStats || {},
+          rngState: chooseMove.lastRngState
         });
       } catch (error) {
         self.postMessage({
@@ -2226,6 +2369,18 @@ function destroyBotWorker() {
     URL.revokeObjectURL(botWorkerBlobUrl);
     botWorkerBlobUrl = null;
   }
+}
+
+// Animated Bot vs Bot starts each game with empty search tables, the same
+// way runHeadlessGame calls resetCubeSearchTables before the first move.
+// A new worker is a new table. The main-thread copy is cleared too, for the
+// fallback path that calls chooseMove in this page.
+function startBotWorkerFresh() {
+  destroyBotWorker();
+  resetCubeSearchTables();
+  const worker = createBotWorker();
+  if (worker) worker.postMessage({ type: 'reset' });
+  return worker;
 }
 
 function cancelBotSearch() {
@@ -2290,6 +2445,9 @@ function scheduleBotTurn() {
       const otherMoves = legalMoves(otherPlayer);
       if (otherMoves.length) {
         moveSequenceHistory.push('PASS');
+        if (liveBotTrace) {
+          liveBotTrace.moves.push({ n: 'PASS', bot: botVsBotKeyFor(currentPlayer), ms: 0, depth: 0, hit: 0, src: 'PASS' });
+        }
         updateMoveSequenceDisplay();
         showPassMessage(currentPlayer);
         switchClockToCurrentPlayer();
@@ -2323,8 +2481,11 @@ function scheduleBotTurn() {
       // 2.0.7: in Bot vs Bot the Bot Summary only reads the stats the engine
       // always returns, so the search is identical with the summary on or off.
       developerMode: opponentMode === 'botvsbot' ? false : developerMode,
-      board: board.map((plane) => plane.map((row) => row.slice()))
+      board: board.map((plane) => plane.map((row) => row.slice())),
+      rngState: opponentMode === 'botvsbot' && liveBotTrace ? liveBotTrace.rngState : null
     };
+    const fixedDepth = fixedDepthForCurrentBot();
+    if (fixedDepth) botContext.fixedDepth = fixedDepth;
 
     chooseBotMoveInWorker(moveOptions, botContext).then((result) => {
       const botSearchTimeMs = Number((result.elapsedMs ?? (performance.now() - botSearchStartedAt)).toFixed(1));
@@ -2334,6 +2495,18 @@ function scheduleBotTurn() {
       if (!isBotTurn() || passMessageActive) {
         hideBotThinkingIndicator();
         return;
+      }
+
+      if (liveBotTrace && result.rngState != null) liveBotTrace.rngState = result.rngState;
+      if (liveBotTrace) {
+        noteLiveSearch(botVsBotKeyFor(currentPlayer), searchStats, botSearchTimeMs);
+        liveBotTrace.pending = {
+          bot: botVsBotKeyFor(currentPlayer),
+          ms: Math.round(botSearchTimeMs * 10) / 10,
+          depth: searchStats.completedDepth || 0,
+          hit: searchStats.hitTimeLimit ? 1 : 0,
+          src: searchStats.source || 'SEARCH'
+        };
       }
 
       if (developerMode) {
@@ -2433,6 +2606,17 @@ function scheduleBotTurn() {
               : []
           });
           updateBotDeveloperPanel();
+        }
+        if (liveBotTrace && chooseMove.lastRngState != null) liveBotTrace.rngState = chooseMove.lastRngState;
+        if (liveBotTrace && isBotTurn() && !passMessageActive) {
+          noteLiveSearch(botVsBotKeyFor(currentPlayer), fallbackStats, fallbackSearchTimeMs);
+          liveBotTrace.pending = {
+            bot: botVsBotKeyFor(currentPlayer),
+            ms: Math.round(fallbackSearchTimeMs * 10) / 10,
+            depth: fallbackStats.completedDepth || 0,
+            hit: fallbackStats.hitTimeLimit ? 1 : 0,
+            src: fallbackStats.source || 'SEARCH'
+          };
         }
         if (isBotTurn() && !passMessageActive) {
           commitBotMove(fallbackMove);
@@ -2859,7 +3043,7 @@ function armBlueOpacityStopTimer() {
     if (blueOpacityAnimationActive && inactiveFor >= BLUE_OPACITY_TIMEOUT) {
       blueOpacityAnimationActive = false;
       if (legalSurface) legalSurface.material.opacity = BLUE_OPACITY_IDLE;
-      if (!autoRotateEnabled && !cameraAnimationActive()) stopContinuousRendering();
+      syncContinuousRendering();
       requestRender();
     } else if (blueOpacityAnimationActive) {
       armBlueOpacityStopTimer();
@@ -2867,8 +3051,35 @@ function armBlueOpacityStopTimer() {
   }, remaining);
 }
 
+// 2.0.10: Pulse only animates the Blue Cubes, so it is offered (and runs) only
+// while Blue Cubes is checked. Its own checked state is kept while hidden, so
+// it comes back exactly as it was when Blue Cubes is re-checked.
+function bluePulseActive() {
+  return bluePulseToggle.checked && blueCubesToggle.checked;
+}
+
+function stopBlueOpacityAnimation() {
+  blueOpacityAnimationActive = false;
+  if (blueOpacityStopTimer !== null) {
+    window.clearTimeout(blueOpacityStopTimer);
+    blueOpacityStopTimer = null;
+  }
+  if (legalSurface) legalSurface.material.opacity = getLegalSurfaceOpacity();
+  syncContinuousRendering();
+}
+
+function updatePulseControlAvailability() {
+  const blueOn = blueCubesToggle.checked;
+  syncPulseControlVisibility();
+  if (!blueOn) {
+    if (blueOpacityAnimationActive || blueOpacityStopTimer !== null) stopBlueOpacityAnimation();
+  } else if (bluePulseToggle.checked && !blueOpacityAnimationActive && gameInProgress && currentLegalKeys.size > 0) {
+    startBlueOpacityAnimation();
+  }
+}
+
 function startBlueOpacityAnimation() {
-  if (!bluePulseToggle.checked || currentLegalKeys.size === 0) return;
+  if (!bluePulseActive() || currentLegalKeys.size === 0) return;
   blueOpacityAnimationActive = true;
   blueOpacityCycleStartTime = performance.now();
   blueOpacityLastActivityTime = blueOpacityCycleStartTime;
@@ -2877,7 +3088,7 @@ function startBlueOpacityAnimation() {
 }
 
 function noteBlueOpacityActivity() {
-  if (!bluePulseToggle.checked || !gameInProgress || currentLegalKeys.size === 0) return;
+  if (!bluePulseActive() || !gameInProgress || currentLegalKeys.size === 0) return;
 
   const now = performance.now();
   blueOpacityLastActivityTime = now;
@@ -2912,7 +3123,7 @@ function updateLegalSurface() {
   const material = new THREE.MeshBasicMaterial({
     color: 0x1e46c0,
     transparent: true,
-    opacity: bluePulseToggle.checked ? getBlueOpacity() : getLegalSurfaceOpacity(),
+    opacity: bluePulseActive() ? getBlueOpacity() : getLegalSurfaceOpacity(),
     side: THREE.DoubleSide,
     // Write depth so only the frontmost legal blue surface contributes to
     // each screen pixel. This prevents apparent opacity changes caused by
@@ -2937,7 +3148,7 @@ function updateLegalCells() {
       window.clearTimeout(blueOpacityStopTimer);
       blueOpacityStopTimer = null;
     }
-  } else if (bluePulseToggle.checked && !blueOpacityAnimationActive && gameInProgress) {
+  } else if (bluePulseActive() && !blueOpacityAnimationActive && gameInProgress) {
     startBlueOpacityAnimation();
   }
 
@@ -2988,8 +3199,12 @@ function getClockRemaining(player, now = performance.now()) {
 
 function updateClockDisplay(now = performance.now()) {
   const durationMs = configuredClockDurationMs();
-  const blackScoreText = String(blackScore);
-  const whiteScoreText = String(whiteScore);
+  // 2.0.10: in Bot vs Bot, prefix each count with the Bot playing that colour
+  // this game (the Bots swap colours between games), e.g. "Bot 2 - 170 Black".
+  const isBotVsBot = opponentMode === 'botvsbot';
+  const botPrefix = player => (isBotVsBot ? `Bot ${botVsBotKeyFor(player) === 'A' ? 1 : 2} - ` : '');
+  const blackScoreText = `${botPrefix(BLACK)}${blackScore}`;
+  const whiteScoreText = `${botPrefix(WHITE)}${whiteScore}`;
 
   if (durationMs === null) {
     blackClockLabel.textContent = `${blackScoreText} Black`;
@@ -3091,6 +3306,38 @@ function handleTimeout() {
   gameInProgress = false;
   passMessage.textContent = `Game Complete\n${timedOutName} ran out of time\n${winnerName} wins\nScore ${score}`;
   passOverlay.classList.add('visible');
+  if (opponentMode === 'botvsbot') {
+    if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+    clearBotVsBotTimers();
+    cancelBotSearch();
+    hideBotThinkingIndicator();
+    if (liveBotTrace) {
+      liveBotTrace.endReason = 'timeout';
+      liveBotTrace.clocked = true;
+      const timedOut = timedOutPlayer === BLACK ? 'BLACK' : 'WHITE';
+      liveBotTrace.clock = {
+        ...(liveBotTrace.clock || {}),
+        durationMs: configuredClockDurationMs(),
+        minutes: Number(gameDuration) || null,
+        timedOut
+      };
+      let positionBlack = 0;
+      let positionWhite = 0;
+      for (let x = 0; x < SIZE; x++) {
+        for (let y = 0; y < SIZE; y++) {
+          for (let z = 0; z < BOARD_DEPTH; z++) {
+            if (board[x][y][z] === BLACK) positionBlack++;
+            else if (board[x][y][z] === WHITE) positionWhite++;
+          }
+        }
+      }
+      liveBotTrace.positionBlack = positionBlack;
+      liveBotTrace.positionWhite = positionWhite;
+    }
+    const forfeitBlack = winner === BLACK ? totalPositions : 0;
+    const forfeitWhite = winner === WHITE ? totalPositions : 0;
+    recordBotVsBotResult(forfeitBlack, forfeitWhite);
+  }
   updateLegalCells();
   updateStatus();
   updateUndoButton();
@@ -3135,12 +3382,19 @@ function updateStatus() {
       ? 'Playing As: Black & White'
       : `Playing As: ${humanPlayer === BLACK ? 'Black' : 'White'}`;
 
+  // 2.0.10: in Bot vs Bot the turn line names the Bot playing that colour this
+  // game, e.g. "Bot 2 - Black's turn" (the Bots swap colours between games).
+  const turnLine = player => {
+    const colourTurn = player === BLACK ? "Black's turn" : "White's turn";
+    return opponentMode === 'botvsbot' ? `Bot ${botVsBotKeyFor(player) === 'A' ? 1 : 2} - ${colourTurn}` : colourTurn;
+  };
+
   if (rewindState) {
     // 2.0.9: rewind shows the viewed position's turn and "Move N of M".
     const atLive = rewindState.index === rewindState.total;
     turnText.textContent = atLive && gameCompleteActive
       ? 'Game Complete'
-      : (currentPlayer === BLACK ? "Black's turn" : "White's turn");
+      : turnLine(currentPlayer);
     turnMoveCount.textContent = rewindMoveLabel();
   } else if (gameCompleteActive) {
     // A completed game has no next player and therefore no meaningful legal
@@ -3149,7 +3403,7 @@ function updateStatus() {
     turnText.textContent = 'Game Complete';
     turnMoveCount.textContent = '';
   } else {
-    turnText.textContent = currentPlayer === BLACK ? "Black's turn" : "White's turn";
+    turnText.textContent = turnLine(currentPlayer);
     const currentLegalMoveCount = legalMoves(currentPlayer).length;
     turnMoveCount.textContent = availableMovesLabel(currentLegalMoveCount);
   }
@@ -3157,12 +3411,9 @@ function updateStatus() {
   scoreLabel.textContent = `Black ${black} · White ${white}`;
   emptySpacesLabel.textContent = `Spaces Remaining: ${empty}`;
   if (opponentMode === 'botvsbot') {
-    // 2.0.5: show which Bot plays which colour in this game (they alternate).
-    // Listed Bot 1 then Bot 2, each with its colour in this game.
-    const describe = (key, short) => {
-      const black = botVsBotKeyFor(BLACK) === key;
-      return `${botVsBotName(key, short)}, ${black ? 'Black' : 'White'}`;
-    };
+    // 2.0.5: listed Bot 1 then Bot 2. 2.0.10: the colour is no longer named
+    // here, because the disc counts now read e.g. "Bot 2 - 170 Black".
+    const describe = (key, short) => botVsBotName(key, short);
     setLongShortLabel(botDifficultyLabel, `Game ${botVsBotGameIndex + 1} · ${describe('A', false)} · ${describe('B', false)}`, `${describe('A', true)} · ${describe('B', true)}`);
     if (botVsBotTallyLabel) {
       setLongShortLabel(botVsBotTallyLabel, botVsBotTallyText(), botVsBotTallyShortText());
@@ -3171,7 +3422,11 @@ function updateStatus() {
   } else {
     if (botVsBotTallyLabel) botVsBotTallyLabel.hidden = true;
     if (botVsBotCountdownLabel) botVsBotCountdownLabel.hidden = true;
-    botDifficultyLabel.textContent = opponentMode === 'bot' ? `Bot: ${capitalizeDifficulty(botDifficulty)}` : '';
+    botDifficultyLabel.textContent = opponentMode === 'bot'
+      ? (splashSearchMode === 'depth' && humanBotFixedDepth
+        ? `Bot: ${capitalizeDifficulty(botDifficulty)} d${humanBotFixedDepth}`
+        : `Bot: ${capitalizeDifficulty(botDifficulty)}`)
+      : '';
   }
   botDifficultyLabel.hidden = opponentMode !== 'bot' && opponentMode !== 'botvsbot';
   // 2.0.2: phone header uses a decluttered row layout in Bot vs Bot.
@@ -3986,6 +4241,8 @@ function loadMoveSequence() {
   // the loaded position is already Game Complete. The choice is still needed
   // for Undo/Redo review so the loaded game retains the intended interaction
   // mode instead of silently becoming a Two Player game.
+  // 2.0.11: replaying a saved Bot vs Bot game stays in Bot vs Bot and uses rewind.
+  if (batchReplayActive) return;
   showLoadedSequenceChoice();
 }
 
@@ -4029,6 +4286,7 @@ function continueLoadedSequence() {
 
   if (selectedMode !== 'both') {
     botDifficulty = document.querySelector('input[name="loadedBotDifficulty"]:checked')?.value || botDifficulty;
+    applySplashSearchToGame(botDifficulty);
   }
 
   hideLoadedSequenceChoice();
@@ -4228,6 +4486,10 @@ function revealGreenCubesOnCompletion() {
   // green-cell surfaces for the final board view. This changes the toggle
   // state normally; it does not lock the option, so the player can turn Green
   // Cubes back off afterward.
+  // 2.0.19: do not dispatch change and do not write cubereversi.greenCubes.
+  // The checked box is only a temporary view of the finished position.
+  // preferredGreenCubes stays as the player left it, and the next new game
+  // restores that saved choice. A later click or J still saves normally.
   if (!hideGreenCubesToggle.checked) {
     hideGreenCubesToggle.checked = true;
     if (occupiedSurface) occupiedSurface.visible = true;
@@ -4292,6 +4554,18 @@ function playMove(x, y, z, isBotMove = false) {
   undoHistory.push(createGameSnapshot());
   redoHistory = [];
   moveSequenceHistory.push(coordinateNotation(x, y, z).replace(/\s+/g, ''));
+  if (liveBotTrace && opponentMode === 'botvsbot') {
+    const pending = liveBotTrace.pending;
+    liveBotTrace.pending = null;
+    liveBotTrace.moves.push({
+      n: coordinateNotation(x, y, z).replace(/\s+/g, ''),
+      bot: pending ? pending.bot : botVsBotKeyFor(currentPlayer),
+      ms: pending ? pending.ms : 0,
+      depth: pending ? pending.depth : 0,
+      hit: pending ? pending.hit : 0,
+      src: pending ? pending.src : 'SEARCH'
+    });
+  }
   updateMoveSequenceDisplay();
   updateUndoButton();
   updateRedoButton();
@@ -4299,6 +4573,20 @@ function playMove(x, y, z, isBotMove = false) {
 
   for (const [fx, fy, fz] of flips) {
     board[fx][fy][fz] = currentPlayer;
+  }
+
+  if (liveBotTrace && opponentMode === 'botvsbot') {
+    let traceBlack = 0;
+    let traceWhite = 0;
+    for (let ix = 0; ix < SIZE; ix++) {
+      for (let iy = 0; iy < SIZE; iy++) {
+        for (let iz = 0; iz < BOARD_DEPTH; iz++) {
+          if (board[ix][iy][iz] === BLACK) traceBlack++;
+          else if (board[ix][iy][iz] === WHITE) traceWhite++;
+        }
+      }
+    }
+    liveBotTrace.scores.push([traceBlack, traceWhite]);
   }
 
   let occupiedCount = 0;
@@ -4336,6 +4624,9 @@ function playMove(x, y, z, isBotMove = false) {
     const currentMoves = legalMoves(currentPlayer);
     if (currentMoves.length) {
       moveSequenceHistory.push('PASS');
+      if (liveBotTrace && opponentMode === 'botvsbot') {
+        liveBotTrace.moves.push({ n: 'PASS', bot: botVsBotKeyFor(nextPlayer), ms: 0, depth: 0, hit: 0, src: 'PASS' });
+      }
       updateMoveSequenceDisplay();
       // Always represent the pass explicitly and remember which player passed.
       // In Bot Mode this is intentionally non-ambiguous: the bot's pass is
@@ -4403,6 +4694,8 @@ function resignGame() {
 function updateVersionLabel() {
   const boardSizeText = BOARD_DEPTH === 1 ? `${SIZE}×${SIZE}×1 (Classic)` : `${SIZE}×${SIZE}×${BOARD_DEPTH}`;
   versionLabel.innerHTML = `<span class="version-board-size">${boardSizeText}</span>`;
+  const startMenuVersion = document.querySelector('.start-menu-version');
+  if (startMenuVersion) startMenuVersion.textContent = `Version ${APP_VERSION}`;
   document.title = `Cube Reversi – 3D Reversi Game`;
   moveCoordinateInput.placeholder = BOARD_DEPTH === 1 ? 'A - 2' : 'A - 2 - S';
 }
@@ -4483,13 +4776,11 @@ function resetBoardForNewGame() {
   gameCompleteActive = false;
   gameInProgress = true;
 
-  // Green Cubes and Blue Cubes are per-game display
-  // preferences. A completed game may reveal them automatically, but every
-  // newly started game must return both options to their default OFF state.
-  hideGreenCubesToggle.checked = false;
-  if (occupiedSurface) occupiedSurface.visible = false;
-  blueCubesToggle.checked = false;
-  if (legalSurface) legalSurface.visible = false;
+  // 2.0.19: Game Complete may have turned Green Cubes on for the final
+  // position. Restore the player's saved Green Cubes, Blue Cubes, and Pulse
+  // instead of forcing the cube displays off. Versions 1.24.0 and 1.24.1
+  // cleared both cube displays so a completed game could not leave them on.
+  applyPreferredCubeDisplay();
 
   setClockPanelVisible(true);
   moveSequenceHistory = [];
@@ -4506,6 +4797,8 @@ function resetBoardForNewGame() {
   lastMoveMarkerKey = null;
   updateLastMoveMarker();
   makeInitialPosition();
+  if (opponentMode === 'botvsbot' && !suppressLiveArchive) beginLiveBotTrace();
+  else if (!suppressLiveArchive) liveBotTrace = null;
   updatePieces();
   updateOccupiedSurface();
   updateLegalCells();
@@ -4518,6 +4811,13 @@ const BOT_THINKING_TIME_DEFAULTS = {
   medium: 0.7,
   hard: 1.1
 };
+
+// Same depth table as Batch (LEVEL_DEPTH): Easy 2, Medium 3, Hard 5.
+// Each depth box is set to the selected difficulty on load. The engine still
+// caps Easy at 2 and Medium at 5 (MEDIUM_MAX_DEPTH); a higher Medium depth
+// chosen in Advanced is allowed up to that cap. Thinking times are separate.
+const BOT_DEPTH_DEFAULTS = { easy: 2, medium: 3, hard: 5 };
+const LIVE_SEARCH_MODE_NAMES = ['botSearchMode', 'blackBotSearchMode', 'whiteBotSearchMode'];
 
 // 2.0: the thinking-time helpers take the input (and its difficulty radio
 // group) so the single Bot control and both Bot vs Bot controls share them.
@@ -4536,6 +4836,8 @@ function setBotThinkingTimeDefault() {
 // default). Collapsed, the Bot uses its level's default time. Expanded, the
 // box shows the time, prefilled with the level default and editable.
 function isThinkingTimeAdvancedOpen(input) {
+  const panel = input?.closest('.bot-advanced-panel');
+  if (panel) return !panel.hidden;
   const row = input?.closest('.bot-thinking-time-row');
   return !!row && !row.hidden;
 }
@@ -4609,6 +4911,109 @@ function getConfiguredBotThinkingTimeMs() {
   return Math.min(10, value) * 1000;
 }
 
+// 2.0.12: same numeric rule as the batch depth boxes. A real number is
+// clamped to 1–32. Anything that is not a number falls back to that
+// level's depth (Easy 2, Medium 3, Hard 5).
+function fixedDepthFromInput(input, difficulty) {
+  const depth = Math.floor(Number(input && input.value));
+  const fallback = BOT_DEPTH_DEFAULTS[difficulty] ?? BOT_DEPTH_DEFAULTS.hard;
+  if (!Number.isFinite(depth)) return fallback;
+  return Math.min(32, Math.max(1, depth));
+}
+
+function readLiveSearchMode() {
+  for (const name of LIVE_SEARCH_MODE_NAMES) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    if (checked) return checked.value === 'time' ? 'time' : 'depth';
+  }
+  return 'depth';
+}
+
+let syncingSearchMode = false;
+
+function syncLiveSearchMode(mode) {
+  if (syncingSearchMode) return;
+  const value = mode === 'time' ? 'time' : 'depth';
+  syncingSearchMode = true;
+  for (const name of LIVE_SEARCH_MODE_NAMES) {
+    const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (input) input.checked = true;
+  }
+  syncingSearchMode = false;
+  if (startPanel) {
+    startPanel.classList.toggle('live-depth-mode', value === 'depth');
+    startPanel.classList.toggle('live-time-mode', value === 'time');
+  }
+  refreshSplashSearchLabels();
+}
+
+function splashBotSpec(difficulty, timeInput, depthInput) {
+  const thinkingTimeMs = effectiveThinkingTimeMs(timeInput, difficulty);
+  const bot = { difficulty, thinkingTimeMs };
+  if (readLiveSearchMode() === 'depth') bot.fixedDepth = fixedDepthFromInput(depthInput, difficulty);
+  return bot;
+}
+
+function searchSummaryText(difficulty, timeInput, depthInput) {
+  if (readLiveSearchMode() === 'depth') {
+    return `Fixed depth ${fixedDepthFromInput(depthInput, difficulty)}`;
+  }
+  const ms = isThinkingTimeAdvancedOpen(timeInput) && thinkingTimeMsFromInput(timeInput) !== null
+    ? thinkingTimeMsFromInput(timeInput)
+    : levelDefaultThinkingTimeMs(difficulty);
+  return `Time limit ${(ms / 1000).toFixed(1)}s`;
+}
+
+function updateLiveSearchSummaries() {
+  const rows = [
+    ['botSearchSummary', 'botDifficulty', botThinkingTimeInput, document.getElementById('botDepth')],
+    ['blackBotSearchSummary', 'blackBotDifficulty', blackBotThinkingTimeInput, document.getElementById('blackBotDepth')],
+    ['whiteBotSearchSummary', 'whiteBotDifficulty', whiteBotThinkingTimeInput, document.getElementById('whiteBotDepth')]
+  ];
+  for (const [id, radioName, timeInput, depthInput] of rows) {
+    const summary = document.getElementById(id);
+    if (!summary) continue;
+    const difficulty = document.querySelector(`input[name="${radioName}"]:checked`)?.value || 'medium';
+    summary.textContent = searchSummaryText(difficulty, timeInput, depthInput);
+  }
+}
+
+function refreshSplashSearchLabels() {
+  updateLiveSearchSummaries();
+  updateBotVsBotLegends();
+}
+
+function onBotDepthLevelChanged(input) {
+  if (!input || input.dataset.edited === 'true') return;
+  const difficulty = document.querySelector(`input[name="${input.dataset.difficultyRadio}"]:checked`)?.value || 'hard';
+  input.value = String(BOT_DEPTH_DEFAULTS[difficulty] ?? BOT_DEPTH_DEFAULTS.hard);
+}
+
+function fixedDepthForCurrentBot() {
+  if (splashSearchMode !== 'depth') return null;
+  if (opponentMode === 'botvsbot') {
+    const depth = Number(botVsBotSettings[currentPlayer] && botVsBotSettings[currentPlayer].fixedDepth);
+    return Number.isFinite(depth) && depth >= 1 ? Math.floor(depth) : null;
+  }
+  return humanBotFixedDepth;
+}
+
+function applySplashSearchToGame(botDifficultyNow) {
+  splashSearchMode = readLiveSearchMode();
+  humanBotFixedDepth = splashSearchMode === 'depth'
+    ? fixedDepthFromInput(document.getElementById('botDepth'), botDifficultyNow)
+    : null;
+}
+
+function archivedBot(bot) {
+  const copy = {
+    difficulty: bot.difficulty,
+    thinkingTimeMs: bot.thinkingTimeMs
+  };
+  if (splashSearchMode === 'depth' && Number(bot.fixedDepth) >= 1) copy.fixedDepth = bot.fixedDepth;
+  return copy;
+}
+
 function updateStartScreenOptions() {
   const selectedOpponent = document.querySelector('input[name="opponentMode"]:checked')?.value || 'human';
   const colorHidden = selectedOpponent === 'human';
@@ -4620,8 +5025,14 @@ function updateStartScreenOptions() {
   const botVsBotSelected = selectedOpponent === 'botvsbot';
   if (startPanel) startPanel.classList.toggle('two-player', selectedOpponent === 'human');
   if (developerModeOption) {
-    // 2.0.7: Bot Summary is offered for Bot vs Bot as well (default off).
+    // 2.0.12: Bot Summary is on by default for Bot vs Bot (Batch uses that mode).
+    // Bot Opponent stays off until the player ticks the box or switches here.
     developerModeOption.hidden = !botModeSelected && !botVsBotSelected;
+    if (!developerModeTouched && developerModeToggle) {
+      const summaryOn = botVsBotSelected;
+      developerModeToggle.checked = summaryOn;
+      developerMode = summaryOn;
+    }
   }
   const hideColor = colorHidden || botVsBotSelected;
   colorFieldset.classList.toggle('start-hidden', hideColor);
@@ -4741,16 +5152,17 @@ function startGameFromSplash() {
   // 2.0.5: with Advanced collapsed the Bot uses its level's default time.
   if (botThinkingTimeInput && !isThinkingTimeAdvancedOpen(botThinkingTimeInput)) setBotThinkingTimeDefault();
   developerMode = !!developerModeToggle?.checked;
+  applySplashSearchToGame(botDifficulty);
   if (opponentMode === 'botvsbot') {
-    const readBot = (color, input) => {
+    const readBot = (color, timeInput, depthId) => {
       const difficulty = document.querySelector(`input[name="${color}BotDifficulty"]:checked`)?.value || 'hard';
-      return { difficulty, thinkingTimeMs: effectiveThinkingTimeMs(input, difficulty) };
+      return splashBotSpec(difficulty, timeInput, document.getElementById(depthId));
     };
     // 2.0.5: Bot A is set up in the Black Bot panel and plays Black in game 1;
     // Bot B (White Bot panel) plays White in game 1. They swap every game.
     botVsBotBots = {
-      A: readBot('black', blackBotThinkingTimeInput),
-      B: readBot('white', whiteBotThinkingTimeInput)
+      A: readBot('black', blackBotThinkingTimeInput, 'blackBotDepth'),
+      B: readBot('white', whiteBotThinkingTimeInput, 'whiteBotDepth')
     };
     botVsBotGameIndex = 0;
     assignBotVsBotColours();
@@ -4769,7 +5181,8 @@ function startGameFromSplash() {
   // Start the Worker immediately for Bot games so its module can load before
   // the first search is requested. The Worker remains alive for the entire
   // game and is destroyed at the next New Game / Start Menu boundary.
-  if (opponentMode === 'bot' || opponentMode === 'botvsbot') createBotWorker();
+  if (opponentMode === 'botvsbot') startBotWorkerFresh();
+  else if (opponentMode === 'bot') createBotWorker();
   if (opponentMode === 'botvsbot') {
     botVsBotPaused = false;
     botVsBotLastMoveAt = performance.now();
@@ -4965,7 +5378,7 @@ function armAutoRotateStopTimer() {
       // Suspend animation after inactivity but preserve the user's enabled
       // preference so fresh activity can resume Auto-Rotate.
       autoRotateAnimationActive = false;
-      if (!cameraAnimationActive()) stopContinuousRendering();
+      syncContinuousRendering();
       requestRender();
     } else if (autoRotateEnabled) {
       armAutoRotateStopTimer();
@@ -5151,6 +5564,34 @@ function cameraAnimationActive() {
   return flipAnimationActive || faceTurnAnimation !== null;
 }
 
+// 2.0.18: Auto-Rotate, Pulse, and camera turns share one render loop and
+// keep separate switches. Spacebar and the Auto-Rotate checkbox change only
+// Auto-Rotate. Pulse keeps animating while it is on and legal moves are showing.
+// Each animation still ends on its own inactivity timer.
+function continuousRenderingNeeded() {
+  return cameraAnimationActive()
+    || blueOpacityAnimationActive
+    || (autoRotateEnabled && autoRotateAnimationActive && !hoveringOverCube && !botVsBotViewHeld());
+}
+
+function syncContinuousRendering() {
+  if (continuousRenderingNeeded()) startContinuousRendering();
+  else stopContinuousRendering();
+}
+
+function applyAutoRotateEnabled(enabled) {
+  autoRotateEnabled = enabled;
+  if (autoRotateToggle.checked !== enabled) autoRotateToggle.checked = enabled;
+  if (autoRotateEnabled) {
+    autoRotateAnimationActive = true;
+    resetAutoRotateStopTimer();
+  } else {
+    autoRotateAnimationActive = false;
+    cancelAutoRotateStopTimer();
+  }
+  syncContinuousRendering();
+}
+
 function moveFacingDirection(x, y, z) {
   const position = worldPosition(x, y, z);
   if (BOARD_DEPTH === 1) {
@@ -5281,7 +5722,7 @@ window.addEventListener('keydown', (event) => {
   // normal gameplay. Keep it as the only keyboard-tab destination so the
   // clickable header title and sidebar controls do not enter the tab order.
   if (event.key === 'Tab') {
-    moveCoordinateInput.focus({ preventScroll: true });
+    if (opponentMode !== 'botvsbot') moveCoordinateInput.focus({ preventScroll: true });
     event.preventDefault();
     return;
   }
@@ -5354,9 +5795,23 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // 2.0.10: P does nothing while Pulse is hidden (Blue Cubes off).
+  if (!isEditableTarget && event.key.toLowerCase() === 'p' && !blueCubesToggle.checked) {
+    event.preventDefault();
+    return;
+  }
   if (!isEditableTarget && event.key.toLowerCase() === 'p') {
     bluePulseToggle.checked = !bluePulseToggle.checked;
     bluePulseToggle.dispatchEvent(new Event('change'));
+    event.preventDefault();
+    return;
+  }
+
+  // S toggles Shade. S is a Z-plane letter in the coordinate box, so it
+  // stays a normal keystroke while that box or any other field is focused.
+  if (!isEditableTarget && event.key.toLowerCase() === 's' &&
+      !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+    setShade(!document.body.classList.contains('shade'));
     event.preventDefault();
     return;
   }
@@ -5447,17 +5902,8 @@ window.addEventListener('keydown', (event) => {
         startFlipAnimation();
         break;
       case ' ':
-        autoRotateEnabled = !autoRotateEnabled;
-        autoRotateToggle.checked = autoRotateEnabled;
-        if (autoRotateEnabled) {
-          autoRotateAnimationActive = true;
-          resetAutoRotateStopTimer();
-          if (!hoveringOverCube) startContinuousRendering();
-        } else {
-          autoRotateAnimationActive = false;
-          cancelAutoRotateStopTimer();
-          if (!cameraAnimationActive()) stopContinuousRendering();
-        }
+        // Pulse's checkbox and animation stay as they are. Only Auto-Rotate toggles.
+        applyAutoRotateEnabled(!autoRotateEnabled);
         break;
       case '-':
       case '_':
@@ -5493,16 +5939,7 @@ moveEntry.addEventListener('submit', (event) => {
 });
 
 autoRotateToggle.addEventListener('change', () => {
-  autoRotateEnabled = autoRotateToggle.checked;
-  if (autoRotateEnabled) {
-    autoRotateAnimationActive = true;
-    resetAutoRotateStopTimer();
-    if (!hoveringOverCube) startContinuousRendering();
-  } else {
-    autoRotateAnimationActive = false;
-    cancelAutoRotateStopTimer();
-    if (!cameraAnimationActive()) stopContinuousRendering();
-  }
+  applyAutoRotateEnabled(autoRotateToggle.checked);
   requestRender();
 });
 
@@ -5552,14 +5989,38 @@ helpOverlay.addEventListener('click', (event) => {
 });
 
 blueCubesToggle.addEventListener('change', () => {
+  rememberBlueCubes(blueCubesToggle.checked);
   if (legalSurface) {
     legalSurface.visible = blueCubesToggle.checked;
   }
+  updatePulseControlAvailability();
   requestRender();
 });
 
+function setShade(on) {
+  const enabled = !!on;
+  document.body.classList.toggle('shade', enabled);
+  if (shadeMoon) shadeMoon.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  try { localStorage.setItem('cubereversi.shade', enabled ? '1' : '0'); } catch (error) {}
+}
+
+if (shadeMoon) {
+  let storedShade = false;
+  try { storedShade = localStorage.getItem('cubereversi.shade') === '1'; } catch (error) {}
+  const shadeOn = document.body.classList.contains('shade') || storedShade;
+  document.body.classList.toggle('shade', shadeOn);
+  shadeMoon.setAttribute('aria-pressed', shadeOn ? 'true' : 'false');
+  // The splash button binds its own click so Shade works before this module
+  // finishes loading. Do not bind a second listener.
+  if (shadeMoon.dataset.bound !== '1') {
+    shadeMoon.dataset.bound = '1';
+    shadeMoon.addEventListener('click', () => setShade(!document.body.classList.contains('shade')));
+  }
+}
+
 bluePulseToggle.addEventListener('change', () => {
-  if (bluePulseToggle.checked) {
+  rememberPulse(bluePulseToggle.checked);
+  if (bluePulseActive()) {
     if (gameInProgress && currentLegalKeys.size > 0) {
       startBlueOpacityAnimation();
     }
@@ -5570,7 +6031,7 @@ bluePulseToggle.addEventListener('change', () => {
       blueOpacityStopTimer = null;
     }
     if (legalSurface) legalSurface.material.opacity = getLegalSurfaceOpacity();
-    if (!autoRotateEnabled && !cameraAnimationActive()) stopContinuousRendering();
+    syncContinuousRendering();
   }
   requestRender();
 });
@@ -5586,6 +6047,7 @@ show3AxisToggle.addEventListener('change', () => {
 showWireframeToggle.addEventListener('change', updateWireframeVisibility);
 
 hideGreenCubesToggle.addEventListener('change', () => {
+  rememberGreenCubes(hideGreenCubesToggle.checked);
   if (occupiedSurface) {
     occupiedSurface.visible = hideGreenCubesToggle.checked;
   }
@@ -5599,33 +6061,61 @@ opponentModeInputs.forEach((input) => {
 // 2.0.5: one wiring for the Bot Opponent box and both Bot vs Bot boxes.
 // Picking Easy / Medium / Hard sets the box to that level's default unless
 // Advanced is open and the user has typed their own time.
-[['botDifficulty', botThinkingTimeInput], ['blackBotDifficulty', blackBotThinkingTimeInput], ['whiteBotDifficulty', whiteBotThinkingTimeInput]].forEach(([radioName, input]) => {
-  if (!input) return;
-  input.dataset.difficultyRadio = radioName;
-  document.querySelectorAll(`input[name="${radioName}"]`).forEach((radio) => {
-    radio.addEventListener('change', () => onBotLevelChangedFor(input));
-  });
-  input.addEventListener('input', () => {
-    sanitizeThinkingTimeInput(input);
-    input.dataset.edited = 'true';
-  });
-  input.addEventListener('blur', () => {
-    sanitizeThinkingTimeInput(input);
-    if (input.value === '') setThinkingTimeDefaultFor(input, radioName);
-  });
-  setThinkingTimeDefaultFor(input, radioName);
+[['botDifficulty', botThinkingTimeInput, 'botDepth'], ['blackBotDifficulty', blackBotThinkingTimeInput, 'blackBotDepth'], ['whiteBotDifficulty', whiteBotThinkingTimeInput, 'whiteBotDepth']].forEach(([radioName, input, depthId]) => {
+  const depthInput = document.getElementById(depthId);
+  if (input) {
+    input.dataset.difficultyRadio = radioName;
+    document.querySelectorAll(`input[name="${radioName}"]`).forEach((radio) => {
+      radio.addEventListener('change', () => {
+        onBotLevelChangedFor(input);
+        onBotDepthLevelChanged(depthInput);
+        refreshSplashSearchLabels();
+      });
+    });
+    input.addEventListener('input', () => {
+      sanitizeThinkingTimeInput(input);
+      input.dataset.edited = 'true';
+      refreshSplashSearchLabels();
+    });
+    input.addEventListener('blur', () => {
+      sanitizeThinkingTimeInput(input);
+      if (input.value === '') setThinkingTimeDefaultFor(input, radioName);
+      refreshSplashSearchLabels();
+    });
+    setThinkingTimeDefaultFor(input, radioName);
+  }
+  if (depthInput) {
+    depthInput.dataset.difficultyRadio = radioName;
+    depthInput.addEventListener('input', () => {
+      depthInput.dataset.edited = 'true';
+      refreshSplashSearchLabels();
+    });
+    depthInput.addEventListener('blur', () => {
+      const difficulty = document.querySelector(`input[name="${radioName}"]:checked`)?.value || 'hard';
+      depthInput.value = String(fixedDepthFromInput(depthInput, difficulty));
+      refreshSplashSearchLabels();
+    });
+    onBotDepthLevelChanged(depthInput);
+  }
 });
+for (const name of LIVE_SEARCH_MODE_NAMES) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (radio.checked) syncLiveSearchMode(radio.value);
+    });
+  });
+}
 // 2.0.5: Bot vs Bot setup legends read e.g. "Bot 1 (Hard 1.1s), Black in game 1".
 function updateBotVsBotLegends() {
   [['black', blackBotThinkingTimeInput, 1, 'Black'], ['white', whiteBotThinkingTimeInput, 2, 'White']].forEach(([color, input, number, first]) => {
     const legend = document.getElementById(`${color}BotLegend`);
     if (!legend) return;
     const difficulty = document.querySelector(`input[name="${color}BotDifficulty"]:checked`)?.value || 'hard';
-    const thinkingTimeMs = isThinkingTimeAdvancedOpen(input) && thinkingTimeMsFromInput(input) !== null
-      ? thinkingTimeMsFromInput(input) : levelDefaultThinkingTimeMs(difficulty);
+    const depthInput = document.getElementById(`${color}BotDepth`);
+    const spec = splashBotSpec(difficulty, input, depthInput);
     const name = document.createElement('span');
     name.className = 'bot-legend-name';
-    name.textContent = `${botVsBotDescribe({ difficulty, thinkingTimeMs }, number)},`;
+    name.textContent = `${botVsBotDescribe(spec, number)},`;
     const colour = document.createElement('span');
     colour.className = 'bot-legend-colour';
     colour.textContent = `${first} in game 1`;
@@ -5640,18 +6130,18 @@ function updateBotVsBotLegends() {
   input?.addEventListener('blur', updateBotVsBotLegends);
 });
 document.querySelectorAll('.advanced-toggle').forEach((button) => {
-  button.addEventListener('click', updateBotVsBotLegends);
   button.addEventListener('click', () => {
     setThinkingTimeAdvancedOpen(button, button.getAttribute('aria-expanded') !== 'true');
-    updateBotVsBotLegends();
+    refreshSplashSearchLabels();
   });
 });
-updateBotVsBotLegends();
+syncLiveSearchMode(readLiveSearchMode());
 botVsBotPauseButton?.addEventListener('click', toggleBotVsBotPause);
 boardPauseButton?.addEventListener('click', toggleBotVsBotPause);
 botVsBotStopButton?.addEventListener('click', stopBotVsBotCountdown);
 
 developerModeToggle.addEventListener('change', () => {
+  developerModeTouched = true;
   developerMode = developerModeToggle.checked;
   updateBotDeveloperPanel();
 });
@@ -5691,10 +6181,11 @@ function applySceneBackground() {
 if (phoneBackgroundQuery.addEventListener) phoneBackgroundQuery.addEventListener('change', applySceneBackground);
 else if (phoneBackgroundQuery.addListener) phoneBackgroundQuery.addListener(applySceneBackground);
 
-window.addEventListener('resize', () => {
+function handleSceneResize() {
   applySceneBackground();
   const width = sceneElement.clientWidth;
   const height = sceneElement.clientHeight;
+  if (!width || !height) return;
 
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -5702,7 +6193,34 @@ window.addEventListener('resize', () => {
   renderer.setSize(width, height);
   updateOrientationMarkerVisibility();
   requestRender();
-});
+}
+window.addEventListener('resize', handleSceneResize);
+
+// 2.0.10: laptop/desktop sidebar hide/show tab, modelled on the Visualizer's
+// green drawer tab. Collapsing the sidebar gives its column to the board; the
+// renderer follows the #scene size (ResizeObserver, so it tracks the slide).
+// The phone layout (max-width 760px) never shows the tab and ignores the
+// class. Like the Visualizer, the state is not saved between visits.
+const sidebarToggleButton = document.getElementById('sidebarToggle');
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  if (!sidebarToggleButton) return;
+  const label = collapsed ? 'Show sidebar' : 'Hide sidebar';
+  sidebarToggleButton.setAttribute('aria-expanded', String(!collapsed));
+  sidebarToggleButton.setAttribute('aria-label', label);
+  sidebarToggleButton.title = label;
+}
+if (sidebarToggleButton) {
+  sidebarToggleButton.addEventListener('click', () => {
+    setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+    // Keep Space / letter shortcuts going to the game, not the tab.
+    sidebarToggleButton.blur();
+    handleSceneResize();
+  });
+}
+if (typeof ResizeObserver === 'function') {
+  new ResizeObserver(() => handleSceneResize()).observe(sceneElement);
+}
 
 for (let x = 0; x < SIZE; x++) {
   for (let y = 0; y < SIZE; y++) {
@@ -5765,14 +6283,14 @@ function animate(now) {
 
   renderScene();
 
-  if (!cameraAnimationActive() && !blueOpacityAnimationActive && (!autoRotateEnabled || !autoRotateAnimationActive || hoveringOverCube || botVsBotViewHeld())) {
-    stopContinuousRendering();
-  }
+  if (!continuousRenderingNeeded()) stopContinuousRendering();
 }
 
 updateUndoButton();
 updateRedoButton();
 updateVersionLabel();
+updateMoveEntryVisibility();
+updatePulseControlAvailability();
 requestRender();
 
 
@@ -5799,3 +6317,209 @@ if (controlsHandleElement) {
   window.addEventListener('scroll', updateControlsHandleState, { passive: true });
   updateControlsHandleState();
 }
+
+function emptyBotStat() {
+  return { nodes: 0, timeMs: 0, searches: 0 };
+}
+
+function noteLiveSearch(botKey, stats, elapsedMs) {
+  if (!liveBotTrace || !liveBotTrace.botStats) return;
+  const src = (stats && stats.source) || 'SEARCH';
+  if (src === 'BOOK' || src === 'PASS') return;
+  const slot = liveBotTrace.botStats[botKey];
+  if (!slot) return;
+  slot.nodes += Number(stats && stats.nodes) || 0;
+  slot.timeMs += Number(elapsedMs) || 0;
+  slot.searches += 1;
+}
+
+function liveBotSummary(stats) {
+  const out = {};
+  for (const key of ['A', 'B']) {
+    const slot = stats && stats[key];
+    const searches = slot && slot.searches ? slot.searches : 0;
+    out[key] = {
+      avgNodes: searches ? Math.round(slot.nodes / searches) : 0,
+      nps: slot && slot.timeMs > 0 ? Math.round((slot.nodes * 1000) / slot.timeMs) : 0,
+      searches
+    };
+  }
+  return out;
+}
+
+function beginLiveBotTrace() {
+  const seed = (Math.floor(Math.random() * 0x100000000) >>> 0) || 1;
+  let black = 0;
+  let white = 0;
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      for (let z = 0; z < BOARD_DEPTH; z++) {
+        if (board[x][y][z] === BLACK) black++;
+        else if (board[x][y][z] === WHITE) white++;
+      }
+    }
+  }
+  // Settings are taken now. A later change on the splash does not rewrite
+  // the game that is already playing.
+  const durationMs = configuredClockDurationMs();
+  liveBotTrace = {
+    seed,
+    rngState: seed,
+    startedAt: new Date().toISOString(),
+    first: botVsBotBlackKey(),
+    moves: [],
+    scores: [[black, white]],
+    pending: null,
+    device: captureDeviceProfile(),
+    searchMode: splashSearchMode,
+    botA: archivedBot(botVsBotBots.A),
+    botB: archivedBot(botVsBotBots.B),
+    boardSize: SIZE,
+    boardDepth: BOARD_DEPTH,
+    clock: durationMs == null ? null : { durationMs, minutes: Number(gameDuration) || null },
+    endReason: 'complete',
+    clocked: false,
+    botStats: { A: emptyBotStat(), B: emptyBotStat() }
+  };
+}
+
+function archiveLiveBotVsBotGame(black, white) {
+  const trace = liveBotTrace;
+  if (!trace) return;
+  liveBotTrace = null;
+  const id = newId('g-');
+  const batchId = newId('b-');
+  const finishedAt = new Date().toISOString();
+  const winner = black > white ? trace.first : (white > black ? (trace.first === 'A' ? 'B' : 'A') : null);
+  const endReason = trace.endReason === 'timeout' ? 'timeout' : 'complete';
+  const game = {
+    id,
+    batchId,
+    kind: 'single',
+    mode: 'animated',
+    index: 1,
+    finishedAt,
+    appVersion: APP_VERSION,
+    engineVersion: ENGINE_VERSION,
+    openingBookId: OPENING_BOOK_ID,
+    boardSize: trace.boardSize,
+    boardDepth: trace.boardDepth,
+    searchMode: trace.searchMode,
+    botA: trace.botA,
+    botB: trace.botB,
+    userAgent: trace.device.userAgent,
+    hardwareConcurrency: trace.device.hardwareConcurrency,
+    deviceMemory: trace.device.deviceMemory,
+    cpuBenchmark: trace.device.cpuBenchmark,
+    seed: trace.seed,
+    first: trace.first,
+    moves: trace.moves,
+    scores: trace.scores,
+    black,
+    white,
+    margin: Math.abs(black - white),
+    winner,
+    endReason,
+    clock: trace.clock || null,
+    clocked: endReason === 'timeout',
+    positionBlack: trace.positionBlack ?? null,
+    positionWhite: trace.positionWhite ?? null,
+    botSummary: liveBotSummary(trace.botStats),
+    early: endReason === 'timeout' ? true : black + white < trace.boardSize * trace.boardSize * trace.boardDepth,
+    passes: trace.moves.filter((move) => move.n === 'PASS').length,
+    book: bookUsage(trace.moves)
+  };
+  const batch = {
+    id: batchId,
+    kind: 'single',
+    mode: 'animated',
+    status: 'complete',
+    startedAt: trace.startedAt,
+    finishedAt,
+    exportedAt: null,
+    requestedGames: 1,
+    appVersion: APP_VERSION,
+    engineVersion: ENGINE_VERSION,
+    openingBookId: OPENING_BOOK_ID,
+    boardSize: game.boardSize,
+    boardDepth: game.boardDepth,
+    searchMode: game.searchMode,
+    endReason,
+    clock: game.clock,
+    clocked: game.clocked,
+    botA: game.botA,
+    botB: game.botB,
+    userAgent: game.userAgent,
+    hardwareConcurrency: game.hardwareConcurrency,
+    deviceMemory: game.deviceMemory,
+    cpuBenchmark: game.cpuBenchmark,
+    gameIds: [id]
+  };
+  saveGame(game).then(() => saveBatch(batch)).then(() => {
+    window.dispatchEvent(new CustomEvent('cubereversi-batch-saved'));
+  }).catch((error) => console.error('Cube Reversi batch archive error:', error));
+}
+
+// Replay a saved game on the 3D board, one move at a time, using rewind.
+function replayStoredCubeGame(record) {
+  if (!record || !Array.isArray(record.moves) || !record.moves.length) return 'That game has no moves.';
+  suppressLiveArchive = true;
+  batchReplayActive = true;
+  try {
+    const depth = resolvedBoardDepth(record);
+    const size = Number(record.boardSize);
+    if (depth === 1) {
+      if (SIZE !== 8 || BOARD_DEPTH !== 1) rebuildBoardForSize('8x8x1');
+    } else if ([4, 6, 8].includes(size) && depth === size) {
+      if (SIZE !== size || BOARD_DEPTH !== size) rebuildBoardForSize(String(size));
+    } else {
+      return 'This board size cannot be replayed.';
+    }
+    opponentMode = 'botvsbot';
+    const modeInput = document.querySelector('input[name="opponentMode"][value="botvsbot"]');
+    if (modeInput) modeInput.checked = true;
+    const copyBot = (bot) => ({
+      difficulty: (bot && bot.difficulty) || 'hard',
+      thinkingTimeMs: Number(bot && bot.thinkingTimeMs) || 1100,
+      ...(bot && bot.fixedDepth ? { fixedDepth: bot.fixedDepth } : {})
+    });
+    botVsBotBots = { A: copyBot(record.botA), B: copyBot(record.botB) };
+    botVsBotGameIndex = record.first === 'B' ? 1 : 0;
+    assignBotVsBotColours();
+    botVsBotTally = { games: 0, a: 0, b: 0, draws: 0 };
+    gameDuration = 'unlimited';
+    botVsBotPaused = true;
+    botGameSessionId++;
+    if (botMoveTimer !== null) { clearTimeout(botMoveTimer); botMoveTimer = null; }
+    clearBotVsBotTimers();
+    cancelBotVsBotCountdown();
+    cancelBotSearch();
+    hideBotThinkingIndicator();
+    liveBotTrace = null;
+    const batchOverlay = document.getElementById('batchOverlay');
+    if (batchOverlay) {
+      batchOverlay.classList.remove('visible');
+      batchOverlay.setAttribute('aria-hidden', 'true');
+    }
+    hideStartScreen();
+    loadSequenceOpenedFromStart = false;
+    if (loadSequenceInput) loadSequenceInput.value = record.moves.map((move) => move.n).join(',');
+    if (loadSequenceError) loadSequenceError.textContent = '';
+    loadMoveSequence();
+    if (loadSequenceError && loadSequenceError.textContent) return loadSequenceError.textContent;
+    botVsBotPaused = true;
+    cancelBotVsBotCountdown();
+    if (passOverlay) passOverlay.classList.remove('visible');
+    gameCompleteActive = true;
+    gameInProgress = false;
+    updateStatus();
+    if (enterRewind()) showRewindPosition(0, false);
+    updateStatus();
+    return '';
+  } finally {
+    batchReplayActive = false;
+    suppressLiveArchive = false;
+  }
+}
+
+mountBatchController({ replay: replayStoredCubeGame });
