@@ -1,0 +1,32 @@
+{
+  "name": "Cube Reversi",
+  "short_name": "Cube Reversi",
+  "description": "A 3D version of Reversi. Free to play at cubereversi.com.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111518",
+  "theme_color": "#111518",
+  "version": "2.0.19",
+  "icons": [
+    {
+      "src": "CubeReversiIcon192.png?v=2.0.19",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "CubeReversiIcon512.png?v=2.0.19",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "CubeReversiIconMaskable512.png?v=2.0.19",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

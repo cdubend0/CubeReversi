@@ -1,11 +1,26 @@
 /*
- * Cube Reversi — Bot Engine (version 2.0.9)
+ * Cube Reversi — Bot Engine (version 2.0.19)
  *
  * The Bot Engine remains a move-selection layer only. CubeReversi.js remains
  * authoritative for game state, rules, legal moves, rendering, turn management,
- * and actually committing moves.
+ * and actually committing moves. runHeadlessGame() plays a cube game by calling
+ * chooseMove(); it does not contain a second search.
+ *
+ * 2.0.11 adds a seedable RNG (unseeded play still uses Math.random), an opening
+ * book id, search-limit instrumentation, and an optional fixed-depth search.
+ * 2.0.12: the splash Advanced search can pass fixedDepth for Bot Opponent
+ * and Bot vs Bot, using the same depth caps as Batch. Time-limited Easy /
+ * Medium / Hard search is unchanged when fixedDepth is unset.
+ * 2.0.13: resetCubeSearchTables() is exported so an animated game can drop
+ * the same search memory a headless game drops. Move selection and the
+ * book are unchanged. ENGINE_VERSION is APP_VERSION from version.js.
  *
  */
+
+import { APP_VERSION } from './version.js?v=2.0.19';
+
+// Same number as the app. Pooling still stores this as engineVersion.
+export const ENGINE_VERSION = APP_VERSION;
 
 const EMPTY = 0;
 const BLACK = 1;
@@ -24,6 +39,36 @@ const DIFFICULTY_PROFILES = {
 };
 const CLASSIC_ENDGAME_EMPTY = 10;
 const THREE_D_ENDGAME_EMPTY = 8;
+
+// Seedable RNG. With no seed, randomUnit() is Math.random(), so unseeded games
+// keep the previous distribution. A seed makes opening-book variety and Easy
+// picks repeatable. Time-limited search depth still depends on the clock.
+let botRngSeeded = false;
+let botRngState = 0;
+
+function randomUnit() {
+  if (!botRngSeeded) return Math.random();
+  botRngState = (botRngState + 0x6D2B79F5) >>> 0;
+  let t = botRngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+export function setBotRandomSeed(seed) {
+  if (seed == null || seed === '') {
+    botRngSeeded = false;
+    botRngState = 0;
+    return;
+  }
+  const n = Number(seed);
+  botRngSeeded = true;
+  botRngState = (Number.isFinite(n) ? (n >>> 0) : 1) || 1;
+}
+
+export function getBotRngState() {
+  return botRngSeeded ? botRngState : null;
+}
 
 // Incremental 64-bit-style Zobrist hashing (two 32-bit lanes) avoids
 // re-serializing the entire board at every search node. The deterministic
@@ -402,7 +447,7 @@ function chooseClassicBookMove(board, player, legalMoveOptions, allowVariety = f
   // 1.34.0: Medium picks among all established book continuations for light
   // opening variety. Hard keeps the deterministic strongest-priority choice.
   const selected = allowVariety && candidates.length > 1
-    ? candidates[Math.floor(Math.random() * candidates.length)]
+    ? candidates[Math.floor(randomUnit() * candidates.length)]
     : candidates[0];
   return {
     move: selected.actualMove,
@@ -655,6 +700,40 @@ const CUBE_OPENING_BOOK = {
 // best-scored book move; Medium and Easy choose among near-best book moves.
 const CUBE_BOOK_MARGIN = { hard: 0, medium: 35, easy: 120 };
 
+// Content id for the opening books shipped in this file (cube trees and names,
+// book margins, and the Classic line list). It changes if that data changes.
+function fnv1aFeed(hash, text) {
+  let h = hash >>> 0;
+  const str = String(text);
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= 0xff;
+  return Math.imul(h, 0x01000193) >>> 0;
+}
+
+function computeOpeningBookId() {
+  let h = 0x811c9dc5;
+  h = fnv1aFeed(h, 'classic');
+  for (const line of CLASSIC_OPENING_BOOK_LINES) {
+    h = fnv1aFeed(h, `${line.priority}|${line.name}|${line.moves}`);
+  }
+  for (const size of [4, 6, 8]) {
+    const book = CUBE_OPENING_BOOK[size];
+    h = fnv1aFeed(h, size);
+    h = fnv1aFeed(h, book && book.tree ? book.tree : '');
+    const names = book && book.names ? book.names : [];
+    for (const entry of names) {
+      h = fnv1aFeed(h, `${entry.family}|${entry.variation}|${entry.moves}`);
+    }
+  }
+  h = fnv1aFeed(h, JSON.stringify(CUBE_BOOK_MARGIN));
+  return `cube-book-${(h >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export const OPENING_BOOK_ID = computeOpeningBookId();
+
 const cubeBookCache = new Map();
 
 function cubeBookTransforms(size) {
@@ -854,7 +933,7 @@ function chooseCubeBookMove(board, size, player, moveOptions, difficulty) {
   const best = candidates[0].score;
   const margin = CUBE_BOOK_MARGIN[difficulty] ?? CUBE_BOOK_MARGIN.medium;
   const pool = candidates.filter((entry) => entry.score >= best - margin);
-  const pick = pool.length > 1 ? pool[Math.floor(Math.random() * pool.length)] : pool[0];
+  const pick = pool.length > 1 ? pool[Math.floor(randomUnit() * pool.length)] : pool[0];
   return { move: pick.move, name: cubeBookLabel(pick.name), score: pick.score, candidates: candidates.length };
 }
 
@@ -2143,7 +2222,7 @@ function legacyFallback(moveOptions) {
   );
   const bestFlips = Math.max(...finalLeaders.map((option) => option.flips));
   const bestOptions = finalLeaders.filter((option) => option.flips === bestFlips);
-  return bestOptions[Math.floor(Math.random() * bestOptions.length)].move;
+  return bestOptions[Math.floor(randomUnit() * bestOptions.length)].move;
 }
 
 // ===========================================================================
@@ -2158,7 +2237,7 @@ function legacyFallback(moveOptions) {
 // 4×4×4 move generation, a 3D-specific evaluation, phase-based time
 // allocation and an exact endgame solver.
 // ===========================================================================
-const CUBE_ENGINE_VERSION = '2.0.9';
+const CUBE_ENGINE_VERSION = ENGINE_VERSION;
 const CUBE_DIRS = (() => {
   const dirs = [];
   for (let dx = -1; dx <= 1; dx++) {
@@ -2854,6 +2933,15 @@ function selectCubeTables(size, difficulty) {
   cubeSolveTT = set.solveTT;
 }
 
+// Drop cached search tables so a headless game depends only on its seed and
+// search mode, not on whatever the previous game stored.
+export function resetCubeSearchTables() {
+  cubeTableSets.clear();
+  cubeTableBoardSize = 0;
+  cubeTT = null;
+  cubeSolveTT = null;
+}
+
 function ttKey1(st, color) { return color === WHITE ? st.h1 ^ st.g.side1 : st.h1; }
 function ttKey2(st, color) { return color === WHITE ? st.h2 ^ st.g.side2 : st.h2; }
 
@@ -3182,6 +3270,11 @@ function chooseMove3D(moveOptions, context, profile) {
   const board = context.board;
   const player = context.player;
   const difficulty = DIFFICULTY_PROFILES[context.difficulty] ? context.difficulty : 'medium';
+  // 2.0.11: optional fixed depth. Absent unless fixed-depth mode sets it
+  // (Batch, or the splash Advanced search in 2.0.12).
+  // Time-limited search below is unchanged when this is not a positive number.
+  const fixedDepthRequest = Number(context.fixedDepth);
+  const fixedDepthMode = Number.isFinite(fixedDepthRequest) && fixedDepthRequest >= 1;
   // 2.0.7: each difficulty level has its own transposition tables. Before,
   // one Worker served both Bots in Bot vs Bot and they shared one table, so
   // Medium's depth-5 search was answered from Hard's deeper entries (and its
@@ -3243,7 +3336,11 @@ function chooseMove3D(moveOptions, context, profile) {
     empties,
     exactSolve: false,
     solvedDiscDiff: null,
-    nps: 0
+    nps: 0,
+    hitTimeLimit: false,
+    searchMode: fixedDepthMode ? 'depth' : 'time',
+    timeLimitMs: Math.round(baseMs),
+    fixedDepth: fixedDepthMode ? Math.floor(fixedDepthRequest) : null
   };
   const toCandidates = (results) => results.map((r) => ({
     move: cubeIndexToMove(st, r.move),
@@ -3267,25 +3364,46 @@ function chooseMove3D(moveOptions, context, profile) {
   const inOpening = plyFromStart < varietyPlies;
   let margin = 0;
   if (inOpening) margin = difficulty === 'hard' ? 0 : (difficulty === 'medium' ? 25 : 60);
-  const maxDepth = difficulty === 'easy'
+  let maxDepth = difficulty === 'easy'
     ? EASY_MAX_DEPTH
     : (difficulty === 'medium' ? Math.min(MEDIUM_MAX_DEPTH, empties + 2) : empties + 2);
 
-  const trySolve = empties <= solveLimit;
-  const midgameDeadline = trySolve && empties > 10 ? startedAt + budgetMs * 0.3 : deadline;
-  const softStop = trySolve ? midgameDeadline : startedAt + budgetMs * 0.5;
+  let trySolve = empties <= solveLimit;
+  let midgameDeadline = trySolve && empties > 10 ? startedAt + budgetMs * 0.3 : deadline;
+  let softStop = trySolve ? midgameDeadline : startedAt + budgetMs * 0.5;
 
   // 2.0.7: Hard always completes at least one ply more than Medium's depth
   // cap, even when that takes longer than its time budget (on a slow
   // Chromebook the budget alone left Hard barely deeper than Medium, whose
   // fixed depth 5 is cheap enough to finish on any machine). The floor
   // has an emergency limit so a very slow machine never stalls.
-  const hardMinDepth = difficulty === 'hard' ? Math.min(MEDIUM_MAX_DEPTH + 1, maxDepth) : 0;
-  const floorDeadline = Math.max(midgameDeadline, startedAt + Math.min(HARD_FLOOR_MAX_MS, budgetMs * HARD_FLOOR_BUDGET_FACTOR));
+  let hardMinDepth = difficulty === 'hard' ? Math.min(MEDIUM_MAX_DEPTH + 1, maxDepth) : 0;
+  let floorDeadline = Math.max(midgameDeadline, startedAt + Math.min(HARD_FLOOR_MAX_MS, budgetMs * HARD_FLOOR_BUDGET_FACTOR));
   // Bot Summary: the deepest the search may go this move (Medium's cap, or
   // the empties-based ceiling) and the guaranteed minimum (Hard only).
   stats.targetDepth = trySolve && empties <= 10 ? empties : maxDepth;
   stats.minDepth = hardMinDepth;
+
+  // 2.0.11 fixed depth: stop on depth, not the clock, so a seed replays on
+  // any machine. Easy still caps at 2 and Medium at 5. The exact solver is
+  // skipped because it stops on a time budget. Time mode does not reach here.
+  if (fixedDepthMode) {
+    const requested = Math.max(1, Math.min(64, Math.floor(fixedDepthRequest)));
+    const cap = difficulty === 'easy'
+      ? EASY_MAX_DEPTH
+      : (difficulty === 'medium' ? MEDIUM_MAX_DEPTH : empties + 2);
+    maxDepth = Math.max(1, Math.min(cap, requested, empties + 2));
+    trySolve = false;
+    midgameDeadline = Number.POSITIVE_INFINITY;
+    softStop = Number.POSITIVE_INFINITY;
+    floorDeadline = Number.POSITIVE_INFINITY;
+    hardMinDepth = 0;
+    st.deadline = Number.POSITIVE_INFINITY;
+    stats.targetDepth = maxDepth;
+    stats.minDepth = 0;
+    stats.fixedDepth = requested;
+    stats.searchMode = 'depth';
+  }
 
   // Iterative deepening midgame search.
   if (!(trySolve && empties <= 10)) {
@@ -3337,10 +3455,10 @@ function chooseMove3D(moveOptions, context, profile) {
     if (difficulty === 'easy' && profile.randomness > 0 && stats.source !== 'SOLVE') {
       const ranked = lastResults.slice().sort((a, b) => b.score - a.score);
       const pool = ranked.slice(0, Math.min(4, ranked.length));
-      bestMove = pool[Math.floor(Math.pow(Math.random(), 1.7) * pool.length)].move;
+      bestMove = pool[Math.floor(Math.pow(randomUnit(), 1.7) * pool.length)].move;
     } else if (inOpening && stats.source !== 'SOLVE') {
       const pool = lastResults.filter((r) => r.exact && r.score >= best - margin);
-      if (pool.length > 1) bestMove = pool[Math.floor(Math.random() * pool.length)].move;
+      if (pool.length > 1) bestMove = pool[Math.floor(randomUnit() * pool.length)].move;
     }
   }
 
@@ -3350,6 +3468,12 @@ function chooseMove3D(moveOptions, context, profile) {
   stats.cutoffs = st.cutoffs;
   stats.tableEntries = cubeTT.size + cubeSolveTT.size;
   stats.nps = Math.round((st.nodes * 1000) / elapsed);
+  // A move "hits the time limit" when the clock reaches the configured
+  // thinking time. Fixed-depth search has no time limit. Book and forced
+  // moves return before this.
+  if (stats.searchMode !== 'depth' && stats.source !== 'FORCED') {
+    stats.hitTimeLimit = (performance.now() - startedAt) >= baseMs - 20;
+  }
   stats.rootCandidateScores = stats.rootCandidateScoreHistory.length
     ? stats.rootCandidateScoreHistory[stats.rootCandidateScoreHistory.length - 1].candidates
     : [];
@@ -3357,7 +3481,7 @@ function chooseMove3D(moveOptions, context, profile) {
   return cubeIndexToMove(st, bestMove);
 }
 
-export function chooseMove(moveOptions, context = null) {
+function selectCubeOrClassicMove(moveOptions, context = null) {
   if (!Array.isArray(moveOptions) || moveOptions.length === 0) return null;
 
   // Keep the established engine available if an older controller calls the
@@ -3387,7 +3511,9 @@ export function chooseMove(moveOptions, context = null) {
         targetDepth: 0,
         source: 'BOOK',
         bookName: bookResult.name,
-        bookPly: bookResult.ply
+        bookPly: bookResult.ply,
+        hitTimeLimit: false,
+        searchMode: Number(context.fixedDepth) >= 1 ? 'depth' : 'time'
       };
       return bookResult.move;
     }
@@ -3409,7 +3535,9 @@ export function chooseMove(moveOptions, context = null) {
         source: 'BOOK',
         bookName: bookResult.name,
         bookScore: bookResult.score,
-        bookCandidates: bookResult.candidates
+        bookCandidates: bookResult.candidates,
+        hitTimeLimit: false,
+        searchMode: Number(context.fixedDepth) >= 1 ? 'depth' : 'time'
       };
       return bookResult.move;
     }
@@ -3428,14 +3556,19 @@ export function chooseMove(moveOptions, context = null) {
   const timeLimit = Number.isFinite(customTimeLimit) && customTimeLimit >= 0
     ? Math.min(10000, customTimeLimit)
     : defaultTimeLimit;
-  const deadline = performance.now() + timeLimit;
+  const classicFixedDepth = Number(context.fixedDepth);
+  const classicDepthMode = Number.isFinite(classicFixedDepth) && classicFixedDepth >= 1;
+  let deadline = classicDepthMode
+    ? Number.POSITIVE_INFINITY
+    : performance.now() + timeLimit;
 
   // Search depth is no longer capped by a fixed difficulty-specific maximum.
   // The remaining empty cells provide a practical game-state ceiling, while the
   // time deadline remains the actual limit on how much search can be completed.
   // This lets 3D Hard use all available thinking time when deeper iterations are
   // still possible, without allowing an unbounded recursion depth.
-  const targetDepth = Math.max(1, counts.empty + 2);
+  let targetDepth = Math.max(1, counts.empty + 2);
+  if (classicDepthMode) targetDepth = Math.max(1, Math.min(targetDepth, Math.floor(classicFixedDepth)));
 
   let bestMove = moveOptions[0].move;
   let previousBest = bestMove;
@@ -3492,7 +3625,11 @@ export function chooseMove(moveOptions, context = null) {
     rootCandidateScores: rootCandidateScoreHistory.length
       ? rootCandidateScoreHistory[rootCandidateScoreHistory.length - 1].candidates
       : [],
-    rootCandidateScoreHistory
+    rootCandidateScoreHistory,
+    hitTimeLimit: classicDepthMode ? false : (performance.now() >= deadline - 20 && deadline !== Number.POSITIVE_INFINITY),
+    searchMode: classicDepthMode ? 'depth' : 'time',
+    timeLimitMs: Math.round(timeLimit),
+    fixedDepth: classicDepthMode ? Math.floor(classicFixedDepth) : null
   };
 
   // Easy mode intentionally avoids always selecting the mathematically best
@@ -3512,7 +3649,7 @@ export function chooseMove(moveOptions, context = null) {
       .sort((a, b) => b.score - a.score);
     const poolSize = Math.min(4, ranked.length);
     const pool = ranked.slice(0, poolSize);
-    const index = Math.floor(Math.pow(Math.random(), 1.7) * pool.length);
+    const index = Math.floor(Math.pow(randomUnit(), 1.7) * pool.length);
     bestMove = pool[index].option.move;
   }
 
@@ -3521,4 +3658,149 @@ export function chooseMove(moveOptions, context = null) {
   return moveOptions.some((option) => moveKey(option.move) === moveKey(bestMove))
     ? bestMove
     : moveOptions[0].move;
+}
+
+export function chooseMove(moveOptions, context = null) {
+  if (context && Object.prototype.hasOwnProperty.call(context, 'rngState')) {
+    if (context.rngState == null) setBotRandomSeed(null);
+    else setBotRandomSeed(context.rngState);
+  }
+  try {
+    return selectCubeOrClassicMove(moveOptions, context);
+  } finally {
+    chooseMove.lastRngState = getBotRngState();
+  }
+}
+
+function yieldToWorkerMessages() {
+  return new Promise((resolve) => {
+    if (typeof MessageChannel === 'function') {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(0);
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+function discPair(board, size) {
+  let black = 0;
+  let white = 0;
+  for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) {
+      for (let z = 0; z < size; z++) {
+        const value = board[x][y][z];
+        if (value === BLACK) black++;
+        else if (value === WHITE) white++;
+      }
+    }
+  }
+  return [black, white];
+}
+
+function botKeyForColor(player, first) {
+  if (player === BLACK) return first === 'B' ? 'B' : 'A';
+  return first === 'B' ? 'A' : 'B';
+}
+
+// Play one cube game with no rendering. chooseMove() is the only move picker.
+// Pass searchMode 'depth' and fixedDepth on each bot for clock-free play.
+export async function runHeadlessGame(config) {
+  const size = config.size;
+  const depth = size;
+  const directions = buildDirections(depth);
+  const first = config.first === 'B' ? 'B' : 'A';
+  const searchMode = config.searchMode === 'depth' ? 'depth' : 'time';
+  setBotRandomSeed(config.seed);
+  resetCubeSearchTables();
+  let board = cubeBookInitialBoard(size);
+  let player = BLACK;
+  const moves = [];
+  const scores = [discPair(board, size)];
+  const bookMoves = { A: 0, B: 0 };
+  let passes = 0;
+  const limitPlies = size * size * size + 2;
+
+  for (let ply = 0; ply < limitPlies; ply++) {
+    await yieldToWorkerMessages();
+    if (config.shouldStop && config.shouldStop()) return { stopped: true };
+    const legal = legalMoves(board, player, size, depth, directions);
+    const bot = botKeyForColor(player, first);
+    if (!legal.length) {
+      const other = opponent(player);
+      if (!legalMoves(board, other, size, depth, directions).length) break;
+      moves.push({ n: 'PASS', bot, ms: 0, depth: 0, hit: 0, src: 'PASS' });
+      passes++;
+      player = other;
+      continue;
+    }
+    const settings = bot === 'A' ? config.botA : config.botB;
+    const moveOptions = legal.map((move) => ({ move }));
+    const context = {
+      boardSize: size,
+      boardDepth: depth,
+      player,
+      difficulty: settings.difficulty,
+      thinkingTimeMs: settings.thinkingTimeMs,
+      developerMode: false,
+      useOpeningBook: true,
+      board: board.map((plane) => plane.map((row) => row.slice()))
+    };
+    if (searchMode === 'depth') context.fixedDepth = settings.fixedDepth;
+    const started = performance.now();
+    const chosen = chooseMove(moveOptions, context);
+    const elapsed = performance.now() - started;
+    const stats = chooseMove.lastSearchStats || {};
+    if (!chosen) throw new Error('Bot returned no move.');
+    const flips = getFlips(board, chosen, player, size, depth, directions);
+    board = applyMove(board, chosen, player, flips);
+    const token = `${'ABCDEFGH'[chosen[0]]}-${chosen[1] + 1}-${'STUVWXYZ'[chosen[2]]}`;
+    const src = stats.source || 'SEARCH';
+    if (src === 'BOOK') bookMoves[bot]++;
+    moves.push({
+      n: token,
+      bot,
+      ms: Math.round(elapsed * 10) / 10,
+      depth: stats.completedDepth || 0,
+      hit: stats.hitTimeLimit ? 1 : 0,
+      src
+    });
+    scores.push(discPair(board, size));
+    if (config.onMove) config.onMove({ ply: moves.length, move: token });
+    player = opponent(player);
+  }
+
+  const [black, white] = scores[scores.length - 1];
+  const cells = size * size * size;
+  const blackBot = first;
+  const whiteBot = first === 'A' ? 'B' : 'A';
+  let winner = null;
+  if (black > white) winner = blackBot;
+  else if (white > black) winner = whiteBot;
+  return {
+    stopped: false,
+    seed: Number(config.seed) >>> 0,
+    first,
+    blackBot,
+    whiteBot,
+    moves,
+    scores,
+    black,
+    white,
+    margin: Math.abs(black - white),
+    winner,
+    early: black + white < cells,
+    passes,
+    book: {
+      A: { used: bookMoves.A > 0, moves: bookMoves.A },
+      B: { used: bookMoves.B > 0, moves: bookMoves.B }
+    },
+    engineVersion: ENGINE_VERSION,
+    openingBookId: OPENING_BOOK_ID,
+    searchMode
+  };
 }

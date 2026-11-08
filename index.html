@@ -5,8 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="Play Cube Reversi in your browser on 4×4×4, 6×6×6, and 8×8×8 3D boards, or play Classic 8×8 Reversi against another player or the AI Bot.">
   <title>Cube Reversi – 3D Reversi Game</title>
-  <link rel="stylesheet" href="CubeReversi.css?v=2.0.9">
-  <link rel="icon" type="image/png" href="CubeReversiIcon.png">
+  <link rel="stylesheet" href="CubeReversi.css?v=2.0.19">
+  <link rel="icon" type="image/png" href="CubeReversiIcon.png?v=2.0.19">
+  <link rel="apple-touch-icon" href="CubeReversiIcon180.png?v=2.0.19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Cube Reversi">
+  <link rel="manifest" href="manifest.json?v=2.0.19">
+  <meta name="theme-color" content="#111518">
   <link rel="canonical" href="https://cubereversi.com/">
   <meta property="og:title" content="Cube Reversi">
   <meta property="og:description" content="A 3D version of Reversi. Free to play at cubereversi.com.">
@@ -20,13 +25,18 @@
   <meta name="twitter:image" content="https://cubereversi.com/CubeReversiSocial.png">
 </head>
 <body>
+  <script>
+    try {
+      if (localStorage.getItem('cubereversi.shade') === '1') document.body.classList.add('shade');
+    } catch (e) {}
+  </script>
   <!-- 2.0.3: phone-only solid strip at the top edge. iOS 26 Safari fills the
        status bar with the colour of a fixed element touching it, so scrolled
        header text no longer shows through behind the clock and battery. -->
   <div id="statusBarShield" aria-hidden="true"></div>
   <div id="startOverlay" aria-hidden="false">
-    <div id="startPanel" role="dialog" aria-modal="true" aria-labelledby="startTitle">
-      <img class="start-logo" src="CubeReversiIcon.png" alt="Cube Reversi logo">
+      <div id="startPanel" class="live-depth-mode" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+      <img class="start-logo" src="CubeReversiIcon.png?v=2.0.19" alt="Cube Reversi logo">
       <h2 id="startTitle">Cube Reversi</h2>
 
 
@@ -62,11 +72,23 @@
             <input type="radio" name="blackBotDifficulty" value="hard" checked>
             <span>Hard</span>
           </label>
-          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="blackBotThinkingTimeRow" data-advanced-for="blackBotThinkingTime">Advanced</button>
-          <div id="blackBotThinkingTimeRow" class="bot-thinking-time-row" hidden>
-            <label for="blackBotThinkingTime">Thinking Time</label>
-            <input id="blackBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 1 thinking time in seconds">
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="blackBotAdvancedPanel" data-advanced-for="blackBotThinkingTime">Advanced</button>
+          <div id="blackBotAdvancedPanel" class="bot-advanced-panel" hidden>
+            <div class="live-search-choice" role="group" aria-label="Bot 1 search">
+              <label class="start-option"><input type="radio" name="blackBotSearchMode" value="depth" checked><span>Fixed depth (recommended)</span></label>
+              <label class="start-option"><input type="radio" name="blackBotSearchMode" value="time"><span>Time limit</span></label>
+              <p class="live-search-note">Fixed depth is the default because a seed replays exactly on any machine. Time limit is optional and depends on this device. Easy still caps at depth 2 and Medium at 5.</p>
+            </div>
+            <div class="bot-thinking-time-row live-time-field">
+              <label for="blackBotThinkingTime">Thinking Time</label>
+              <input id="blackBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 1 thinking time in seconds">
+            </div>
+            <div class="bot-thinking-time-row live-depth-field">
+              <label for="blackBotDepth">Depth</label>
+              <input id="blackBotDepth" class="bot-thinking-time-input" type="text" inputmode="numeric" autocomplete="off" maxlength="2" value="5" aria-label="Bot 1 fixed search depth">
+            </div>
           </div>
+          <p id="blackBotSearchSummary" class="live-search-summary">Fixed depth 5</p>
         </fieldset>
 
         <fieldset id="colorFieldset" class="start-fieldset">
@@ -124,11 +146,23 @@
             <input type="radio" name="botDifficulty" value="hard">
             <span>Hard</span>
           </label>
-          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="botThinkingTimeRow" data-advanced-for="botThinkingTime">Advanced</button>
-          <div id="botThinkingTimeRow" class="bot-thinking-time-row" hidden>
-            <label for="botThinkingTime">Thinking Time</label>
-            <input id="botThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="0.7" aria-label="Bot thinking time in seconds">
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="botAdvancedPanel" data-advanced-for="botThinkingTime">Advanced</button>
+          <div id="botAdvancedPanel" class="bot-advanced-panel" hidden>
+            <div class="live-search-choice" role="group" aria-label="Bot search">
+              <label class="start-option"><input type="radio" name="botSearchMode" value="depth" checked><span>Fixed depth (recommended)</span></label>
+              <label class="start-option"><input type="radio" name="botSearchMode" value="time"><span>Time limit</span></label>
+              <p class="live-search-note">Fixed depth is the default because a seed replays exactly on any machine. Time limit is optional and depends on this device. Easy still caps at depth 2 and Medium at 5.</p>
+            </div>
+            <div class="bot-thinking-time-row live-time-field">
+              <label for="botThinkingTime">Thinking Time</label>
+              <input id="botThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="0.7" aria-label="Bot thinking time in seconds">
+            </div>
+            <div class="bot-thinking-time-row live-depth-field">
+              <label for="botDepth">Depth</label>
+              <input id="botDepth" class="bot-thinking-time-input" type="text" inputmode="numeric" autocomplete="off" maxlength="2" value="3" aria-label="Bot fixed search depth">
+            </div>
           </div>
+          <p id="botSearchSummary" class="live-search-summary">Fixed depth 3</p>
         </fieldset>
         <fieldset id="whiteBotFieldset" class="start-fieldset bot-vs-bot-fieldset start-hidden" hidden>
           <legend id="whiteBotLegend"><span class="bot-legend-name">Bot 2 (Hard 1.1s),</span> <span class="bot-legend-colour">White in game 1</span></legend>
@@ -144,11 +178,23 @@
             <input type="radio" name="whiteBotDifficulty" value="hard" checked>
             <span>Hard</span>
           </label>
-          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="whiteBotThinkingTimeRow" data-advanced-for="whiteBotThinkingTime">Advanced</button>
-          <div id="whiteBotThinkingTimeRow" class="bot-thinking-time-row" hidden>
-            <label for="whiteBotThinkingTime">Thinking Time</label>
-            <input id="whiteBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 2 thinking time in seconds">
+          <button type="button" class="advanced-toggle" aria-expanded="false" aria-controls="whiteBotAdvancedPanel" data-advanced-for="whiteBotThinkingTime">Advanced</button>
+          <div id="whiteBotAdvancedPanel" class="bot-advanced-panel" hidden>
+            <div class="live-search-choice" role="group" aria-label="Bot 2 search">
+              <label class="start-option"><input type="radio" name="whiteBotSearchMode" value="depth" checked><span>Fixed depth (recommended)</span></label>
+              <label class="start-option"><input type="radio" name="whiteBotSearchMode" value="time"><span>Time limit</span></label>
+              <p class="live-search-note">Fixed depth is the default because a seed replays exactly on any machine. Time limit is optional and depends on this device. Easy still caps at depth 2 and Medium at 5.</p>
+            </div>
+            <div class="bot-thinking-time-row live-time-field">
+              <label for="whiteBotThinkingTime">Thinking Time</label>
+              <input id="whiteBotThinkingTime" class="bot-thinking-time-input" type="text" inputmode="decimal" autocomplete="off" maxlength="4" value="1.1" aria-label="Bot 2 thinking time in seconds">
+            </div>
+            <div class="bot-thinking-time-row live-depth-field">
+              <label for="whiteBotDepth">Depth</label>
+              <input id="whiteBotDepth" class="bot-thinking-time-input" type="text" inputmode="numeric" autocomplete="off" maxlength="2" value="5" aria-label="Bot 2 fixed search depth">
+            </div>
           </div>
+          <p id="whiteBotSearchSummary" class="live-search-summary">Fixed depth 5</p>
         </fieldset>
       </div>
 
@@ -168,11 +214,13 @@
           <span>Bot Summary</span>
         </label>
         <button id="startLoadSequenceButton" type="button">Load Sequence</button>
+        <button id="batchModeButton" type="button" hidden>Batch</button>
         <button id="startGameButton" type="button" autofocus>Start Game</button>
       </div>
+      <p id="batchRunningNote" class="start-note" hidden>A headless batch is running. Open Batch for progress. It keeps going if this tab is hidden.</p>
       <a class="start-menu-feedback" href="mailto:feedback@cubereversi.com?subject=Cube%20Reversi%20Feedback">feedback@cubereversi.com</a>
       <div class="start-menu-footer">
-        <div class="start-menu-version">Version 2.0.9</div>
+        <div class="start-menu-version">Version 2.0.19</div>
         <a class="start-menu-opening-book" href="CubeReversi_Opening_Book.pdf" target="_blank" rel="noopener">Opening Book (PDF)</a>
       </div>
     </div>
@@ -228,7 +276,7 @@
   <div id="appShell">
   <header class="topbar">
     <div class="brand-group">
-      <img id="brandLogo" class="brand-logo" src="CubeReversiIcon.png" alt="Cube Reversi logo">
+      <img id="brandLogo" class="brand-logo" src="CubeReversiIcon.png?v=2.0.19" alt="Cube Reversi logo">
       <div class="brand-text">
         <h1 id="brandTitle" role="button" tabindex="-1" aria-label="Start a new game">Cube Reversi</h1>
       </div>
@@ -257,6 +305,14 @@
     <section id="game">
       <div id="scene" aria-label="Three-dimensional Cube Reversi board"></div>
       <img id="botThinkingIndicator" src="ReversiThinking.webp" alt="Bot thinking" hidden>
+      <!-- 2.0.15: quiet Shade crescent. It sits in this corner of the board,
+           and steps left while the thinking sphere is showing. On the splash
+           and batch screen it uses the same corner of the viewport. -->
+      <button id="shadeMoon" type="button" aria-label="Shade" title="Shade" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
       <!-- 2.0.4: on-board Pause/Resume for Bot vs Bot (mirrors the controls-panel button). -->
       <button id="boardPauseButton" class="board-pause-button" type="button" hidden aria-pressed="false" aria-label="Pause Bot vs Bot" title="Pause">
         <span class="board-pause-icon" aria-hidden="true"></span>
@@ -294,7 +350,8 @@
           <p><strong>L:</strong> Wireframe</p>
           <p><strong>J:</strong> Green Cubes</p>
           <p><strong>I:</strong> Blue Cubes</p>
-          <p><strong>P:</strong> Pulse</p>
+          <p><strong>P:</strong> Pulse (while Blue Cubes is on)</p>
+          <p><strong>S:</strong> Shade</p>
           <p><strong>M:</strong> Undo</p>
           <p><strong>K:</strong> Redo</p>
           <p><strong>[ / ]:</strong> Rewind Back / Forward (Bot vs Bot)</p>
@@ -341,6 +398,9 @@
                maxlength="9" placeholder="A - 2 - S" aria-label="Move coordinate">
         <button id="moveButton" type="submit">Play</button>
       </form>
+      <!-- 2.0.10: laptop/desktop sidebar hide/show tab (same green text-free tab as
+           the Visualizer drawer). Never shown in the phone layout (max-width 760px). -->
+      <button id="sidebarToggle" type="button" aria-controls="sidebarControls" aria-expanded="true" aria-label="Hide sidebar" title="Hide sidebar"></button>
     </section>
 
     <div class="controls-shell">
@@ -349,7 +409,7 @@
         <span class="controls-handle-pill" aria-hidden="true"></span>
         <span class="controls-handle-label" aria-hidden="true"><span class="controls-handle-chevron"></span>Options</span>
       </button>
-    <aside class="controls">
+    <aside id="sidebarControls" class="controls">
   <label class="toggle-control" for="bookOpeningsToggle">
     <input id="bookOpeningsToggle" type="checkbox" checked>
     <span>Name Openings</span>
@@ -359,7 +419,7 @@
     <span>Auto-Rotate</span>
   </label>
   <label class="toggle-control" for="show3AxisToggle">
-    <input id="show3AxisToggle" type="checkbox">
+    <input id="show3AxisToggle" type="checkbox" checked>
     <span>3-Axis</span>
   </label>
   <label class="toggle-control" for="showWireframeToggle">
@@ -378,6 +438,27 @@
     <input id="bluePulseToggle" type="checkbox">
     <span>Pulse</span>
   </label>
+  <!-- 2.0.19: restore Green Cubes, Blue Cubes, and Pulse before paint.
+       Same localStorage pattern as Shade (cubereversi.shade). Missing keys
+       keep the HTML defaults: all three off. Pulse stays hidden until Blue
+       Cubes is on. Game Complete's temporary Green Cubes reveal is not stored. -->
+  <script>
+    try {
+      var storedGreen = localStorage.getItem('cubereversi.greenCubes');
+      var storedBlue = localStorage.getItem('cubereversi.blueCubes');
+      var storedPulse = localStorage.getItem('cubereversi.pulse');
+      if (storedGreen === '1' || storedGreen === '0') {
+        document.getElementById('hideGreenCubesToggle').checked = storedGreen === '1';
+      }
+      if (storedBlue === '1' || storedBlue === '0') {
+        document.getElementById('blueCubesToggle').checked = storedBlue === '1';
+      }
+      if (storedPulse === '1' || storedPulse === '0') {
+        document.getElementById('bluePulseToggle').checked = storedPulse === '1';
+      }
+      if (storedBlue !== '1') document.body.classList.add('pulse-control-hidden');
+    } catch (e) {}
+  </script>
   <div class="history-actions">
     <button id="undoButton" type="button" disabled>Undo Move</button>
     <button id="redoButton" type="button" disabled>Redo Move</button>
@@ -416,6 +497,109 @@
     }
   }
   </script>
-  <script type="module" src="CubeReversi.js?v=2.0.9"></script>
+  <div id="batchOverlay" class="batch-depth-mode" aria-hidden="true">
+    <div id="batchPanel" role="dialog" aria-modal="true" aria-labelledby="batchTitle">
+      <h2 id="batchTitle">Bot vs Bot batch</h2>
+      <button id="batchBack" type="button" class="batch-back">Back to main menu</button>
+      <div id="batchBackConfirm" class="batch-confirm" hidden>
+        <p id="batchBackConfirmText">A batch is running. Stop it and return to the main menu?</p>
+        <div class="batch-actions">
+          <button id="batchBackConfirmStop" type="button">Stop batch and go back</button>
+          <button id="batchBackConfirmCancel" type="button">Stay</button>
+        </div>
+      </div>
+      <p class="batch-lead">Plays headless in a worker, with no 3D rendering, and keeps going if this tab is hidden. Colors alternate: Bot A is Black in game 1, Bot B in game 2, and so on.</p>
+      <div class="batch-form">
+        <fieldset class="start-fieldset">
+          <legend>Board size</legend>
+          <label class="start-option"><input type="radio" name="batchBoardSize" value="4" checked><span>4×4×4</span></label>
+          <label class="start-option"><input type="radio" name="batchBoardSize" value="6"><span>6×6×6</span></label>
+          <label class="start-option"><input type="radio" name="batchBoardSize" value="8"><span>8×8×8</span></label>
+        </fieldset>
+        <fieldset class="start-fieldset">
+          <legend>Search</legend>
+          <label class="start-option"><input type="radio" name="batchSearchMode" value="depth" checked><span>Fixed depth (recommended)</span></label>
+          <label class="start-option"><input type="radio" name="batchSearchMode" value="time"><span>Time limit</span></label>
+          <p class="batch-lead">Fixed depth is the default because a seed replays exactly on any machine. Time limit is optional and depends on this device. Easy still caps at depth 2 and Medium at 5.</p>
+        </fieldset>
+        <fieldset class="start-fieldset">
+          <legend>Bot A</legend>
+          <label class="start-option"><input type="radio" name="batchBotA" value="easy"><span>Easy</span></label>
+          <label class="start-option"><input type="radio" name="batchBotA" value="medium"><span>Medium</span></label>
+          <label class="start-option"><input type="radio" name="batchBotA" value="hard" checked><span>Hard</span></label>
+          <div class="bot-thinking-time-row batch-time-field">
+            <label for="batchBotATime">Thinking time (s)</label>
+            <input id="batchBotATime" class="bot-thinking-time-input" type="text" inputmode="decimal" maxlength="4" value="1.1" aria-label="Bot A thinking time in seconds">
+          </div>
+          <div class="bot-thinking-time-row batch-depth-field">
+            <label for="batchBotADepth">Depth</label>
+            <input id="batchBotADepth" class="bot-thinking-time-input" type="text" inputmode="numeric" maxlength="2" value="5" aria-label="Bot A fixed search depth">
+          </div>
+        </fieldset>
+        <fieldset class="start-fieldset">
+          <legend>Bot B</legend>
+          <label class="start-option"><input type="radio" name="batchBotB" value="easy"><span>Easy</span></label>
+          <label class="start-option"><input type="radio" name="batchBotB" value="medium"><span>Medium</span></label>
+          <label class="start-option"><input type="radio" name="batchBotB" value="hard" checked><span>Hard</span></label>
+          <div class="bot-thinking-time-row batch-time-field">
+            <label for="batchBotBTime">Thinking time (s)</label>
+            <input id="batchBotBTime" class="bot-thinking-time-input" type="text" inputmode="decimal" maxlength="4" value="1.1" aria-label="Bot B thinking time in seconds">
+          </div>
+          <div class="bot-thinking-time-row batch-depth-field">
+            <label for="batchBotBDepth">Depth</label>
+            <input id="batchBotBDepth" class="bot-thinking-time-input" type="text" inputmode="numeric" maxlength="2" value="5" aria-label="Bot B fixed search depth">
+          </div>
+        </fieldset>
+        <label class="start-select-label" for="batchGameCount">Number of games</label>
+        <input id="batchGameCount" class="bot-thinking-time-input batch-game-count" type="text" inputmode="numeric" maxlength="3" value="20" aria-label="Number of games">
+      </div>
+      <div class="batch-actions">
+        <button id="batchStart" type="button">Start</button>
+        <button id="batchStop" type="button" disabled>Stop</button>
+      </div>
+      <div id="batchProgress" hidden>
+        <div class="batch-progress-track"><div id="batchProgressFill"></div></div>
+        <p id="batchProgressText"></p>
+      </div>
+      <p id="batchError" class="batch-error" hidden></p>
+      <div id="batchSummary"></div>
+      <div class="batch-actions batch-export-actions">
+        <button id="batchSaveFolder" type="button" class="batch-primary" hidden disabled>Save to folder</button>
+        <button id="batchChangeFolder" type="button" class="batch-minor" hidden>Change folder</button>
+        <button id="batchChooseFolder" type="button" hidden>Choose export folder</button>
+        <button id="batchExportJson" type="button" disabled>Download JSON</button>
+        <button id="batchExportCsv" type="button" disabled>Download CSV</button>
+        <button id="batchImport" type="button">Import JSON</button>
+        <button id="batchDelete" type="button" disabled>Delete</button>
+        <input id="batchImportFile" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p id="batchExportStatus" class="batch-export-status" role="status" aria-live="polite" hidden></p>
+      <p id="batchExportFolderNote" class="batch-lead"></p>
+      <h3 class="batch-history-title">Combined matchups</h3>
+      <p class="batch-lead">Games are pooled by engine, opening book, board size and depth, and bot settings (difficulty and fixed depth or time limit). The app version is recorded and shown, and does not split a pool. Bot 1 and Bot 2 are the same bot when their settings match. Each config shows wins, losses, and draws as Black and as White. Black always moves first. Fixed-depth pools combine animated and batch games from any machine. Time-limit pools combine animated and batch games that share a CPU benchmark band, and the split is shown. Clock timeouts are saved and left out of these pools.</p>
+      <div id="batchMatchups"></div>
+      <h3 class="batch-history-title">History</h3>
+      <ul id="batchHistory"></ul>
+    </div>
+  </div>
+  <script type="module" src="CubeReversi.js?v=2.0.19"></script>
+  <div id="shadeOverlay" aria-hidden="true"></div>
+  <!-- 2.0.15: click works before the game module loads. S still toggles Shade. -->
+  <script>
+    (function () {
+      var button = document.getElementById('shadeMoon');
+      if (!button) return;
+      function applyShade(on) {
+        document.body.classList.toggle('shade', !!on);
+        button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        try { localStorage.setItem('cubereversi.shade', on ? '1' : '0'); } catch (e) {}
+      }
+      button.setAttribute('aria-pressed', document.body.classList.contains('shade') ? 'true' : 'false');
+      button.addEventListener('click', function () {
+        applyShade(!document.body.classList.contains('shade'));
+      });
+      button.dataset.bound = '1';
+    })();
+  </script>
 </body>
 </html>
